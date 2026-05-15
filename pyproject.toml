@@ -1,0 +1,73 @@
+# SPDX-License-Identifier: Apache-2.0
+[project]
+name = "nest-workspace"
+version = "0.1.0"
+description = "NEST — Network Environment for Swarm Testing"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+dependencies = [
+    "nest-core",
+    "nest-sdk",
+    "nest-cli",
+    "nest-mocks",
+    "nest-scenarios",
+    "nest-shell",
+    "nest-plugins-reference",
+]
+
+[tool.uv.workspace]
+members = [
+    "packages/nest-core",
+    "packages/nest-sdk",
+    "packages/nest-cli",
+    "packages/nest-mocks",
+    "packages/nest-scenarios",
+    "packages/nest-shell",
+    "packages/nest-plugins-reference",
+]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "hypothesis>=6.100",
+    "ruff>=0.4",
+    "pyright>=1.1",
+]
+
+[tool.uv.sources]
+nest-core = { workspace = true }
+nest-sdk = { workspace = true }
+nest-cli = { workspace = true }
+nest-mocks = { workspace = true }
+nest-scenarios = { workspace = true }
+nest-shell = { workspace = true }
+nest-plugins-reference = { workspace = true }
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "A", "SIM", "TCH"]
+ignore = ["TC001", "TC002", "TC003", "A002"]
+
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+venvPath = "."
+venv = ".venv"
+extraPaths = [
+    "packages/nest-core",
+    "packages/nest-sdk",
+    "packages/nest-cli",
+    "packages/nest-mocks",
+    "packages/nest-scenarios",
+    "packages/nest-shell",
+    "packages/nest-plugins-reference",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["packages"]
+addopts = ["--import-mode=importlib"]

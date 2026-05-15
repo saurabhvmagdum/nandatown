@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: Apache-2.0
+[project]
+name = "nest-core"
+version = "0.1.0"
+description = "NEST core engine: layer interfaces, runtime, event loop, and simulator"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+dependencies = [
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["nest_core"]
