@@ -263,7 +263,7 @@ def shell_voting_factory(
 # ---------------------------------------------------------------------------
 
 _CONSENSUS_LEADER_PROMPT = """\
-You are a leader in a Byzantine fault-tolerant consensus simulation.
+You are a leader in a quorum-based consensus simulation.
 Your role is: leader
 
 Propose values to followers and collect their votes.
@@ -284,7 +284,7 @@ Rules:
 """
 
 _CONSENSUS_FOLLOWER_PROMPT = """\
-You are a follower in a Byzantine fault-tolerant consensus simulation.
+You are a follower in a quorum-based consensus simulation.
 Your role is: follower
 
 Vote on proposals from the leader.

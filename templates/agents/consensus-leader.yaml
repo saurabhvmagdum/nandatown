@@ -5,7 +5,7 @@ model: gpt-4o-mini
 temperature: 0.7
 max_tokens: 256
 system_prompt: |
-  You are a leader in a Byzantine fault-tolerant consensus simulation.
+  You are a leader in a quorum-based consensus simulation.
   Your role is: leader
 
   Propose values to followers and collect their votes.

@@ -142,6 +142,28 @@ _METRIC_FUNCS: dict[str, Any] = {
 ALL_METRICS: list[str] = list(_METRIC_FUNCS.keys())
 
 
+def validate_protocol(
+    trace_path: str | Path,
+    scenario_type: str,
+) -> dict[str, Any]:
+    """Run protocol validators and return results as part of metrics output.
+
+    Example::
+
+        results = validate_protocol("trace.jsonl", "marketplace")
+        # {"validations": [{"name": ..., "passed": ..., "detail": ...}, ...],
+        #  "all_passed": True}
+    """
+    from nest_core.validators import validate_trace
+
+    trace_path = Path(trace_path)
+    vresults = validate_trace(trace_path, scenario_type)
+    return {
+        "validations": [{"name": r.name, "passed": r.passed, "detail": r.detail} for r in vresults],
+        "all_passed": all(r.passed for r in vresults),
+    }
+
+
 def generate_html_report(
     trace_path: str | Path,
     metrics: dict[str, float],

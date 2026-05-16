@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-# Consensus scenario: Byzantine fault-tolerant agreement.
+# Consensus scenario: leader-based quorum voting.
 name: consensus
-description: "1 leader and 19 followers reaching BFT consensus."
+description: "1 leader and 19 followers reaching agreement via quorum voting."
 
 tier: 1
 seed: 42

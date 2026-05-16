@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Byzantine fault-tolerant consensus scenario.
+"""Leader-based quorum voting scenario.
 
 A leader proposes values, followers vote accept/reject,
-and consensus is reached when a quorum agrees.
+and a value is committed when a configurable quorum agrees.
+This is a simplified voting protocol, not a full BFT implementation.
 
 Example::
 
