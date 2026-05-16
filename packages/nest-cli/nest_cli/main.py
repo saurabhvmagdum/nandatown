@@ -27,6 +27,9 @@ app = typer.Typer(
 plugins_app = typer.Typer(help="Manage plugins.")
 app.add_typer(plugins_app, name="plugins")
 
+templates_app = typer.Typer(help="Manage agent templates.")
+app.add_typer(templates_app, name="templates")
+
 
 @app.command()
 def run(
@@ -389,6 +392,89 @@ def plugins_list(
             current_layer = layer_name
             typer.echo(f"\n{layer_name}:")
         typer.echo(f"  - {plugin_name}")
+
+
+@templates_app.command("list")
+def templates_list() -> None:
+    """List available agent templates."""
+    from nest_shell.templates import TemplateRegistry
+
+    reg = TemplateRegistry()
+    templates = reg.list_templates()
+
+    if not templates:
+        typer.echo("No templates found.")
+        return
+
+    for tpl in templates:
+        typer.echo(f"  {tpl.name:30s} {tpl.provider:10s} {tpl.model}")
+
+
+@templates_app.command("show")
+def templates_show(
+    name: str = typer.Argument(help="Template name to display."),
+) -> None:
+    """Show details of a specific agent template."""
+    from nest_shell.templates import TemplateRegistry
+
+    reg = TemplateRegistry()
+    try:
+        tpl = reg.get_template(name)
+    except KeyError:
+        typer.echo(f"Error: template not found: {name}", err=True)
+        raise typer.Exit(1) from None
+
+    typer.echo(f"Name:        {tpl.name}")
+    typer.echo(f"Description: {tpl.description}")
+    typer.echo(f"Provider:    {tpl.provider}")
+    typer.echo(f"Model:       {tpl.model}")
+    typer.echo(f"Temperature: {tpl.temperature}")
+    typer.echo(f"Max tokens:  {tpl.max_tokens}")
+    typer.echo(f"\nSystem prompt:\n{tpl.system_prompt}")
+
+
+@templates_app.command("create")
+def templates_create(
+    name: str = typer.Argument(help="Name for the new template."),
+    prompt: str = typer.Option(
+        "You are a helpful agent.",
+        "--prompt",
+        "-p",
+        help="System prompt for the agent.",
+    ),
+    provider: str = typer.Option("openai", help="LLM provider."),
+    model: str = typer.Option("gpt-4o-mini", help="Model name."),
+) -> None:
+    """Create a new agent template."""
+    from nest_shell.templates import AgentTemplate, TemplateRegistry
+
+    reg = TemplateRegistry()
+    tpl = AgentTemplate(
+        name=name,
+        system_prompt=prompt,
+        provider=provider,
+        model=model,
+    )
+    path = reg.save_template(tpl)
+    typer.echo(f"Created template: {path}")
+
+
+@templates_app.command("duplicate")
+def templates_duplicate(
+    name: str = typer.Argument(help="Name of the template to duplicate."),
+    new_name: str = typer.Argument(help="Name for the new copy."),
+) -> None:
+    """Duplicate an existing template under a new name."""
+    from nest_shell.templates import TemplateRegistry
+
+    reg = TemplateRegistry()
+    try:
+        new_tpl = reg.duplicate_template(name, new_name)
+    except KeyError:
+        typer.echo(f"Error: template not found: {name}", err=True)
+        raise typer.Exit(1) from None
+
+    typer.echo(f"Duplicated '{name}' as '{new_tpl.name}'")
 
 
 if __name__ == "__main__":

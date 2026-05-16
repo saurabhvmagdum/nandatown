@@ -100,22 +100,41 @@ class ScenarioRunner:
             agents = runner._create_shell_agents(plugins)
         """
         from nest_shell.agent import shell_marketplace_factory
-        from nest_shell.factories import shell_auction_factory, shell_voting_factory
-        from nest_shell.llm import LiteLLMBackend, MockLLMBackend
+        from nest_shell.factories import (
+            shell_auction_factory,
+            shell_consensus_factory,
+            shell_reputation_factory,
+            shell_supply_chain_factory,
+            shell_voting_factory,
+        )
+        from nest_shell.llm import AnthropicBackend, MockLLMBackend, OpenAIBackend
 
+        provider = self._config.agents.llm_provider
         model = self._config.agents.llm_model
-        backend = MockLLMBackend() if model == "mock" else LiteLLMBackend(model=model)
+
+        backend: MockLLMBackend | OpenAIBackend | AnthropicBackend
+        if provider == "mock" or model == "mock":
+            backend = MockLLMBackend()
+        elif provider == "anthropic":
+            backend = AnthropicBackend(model=model)
+        else:
+            backend = OpenAIBackend(model=model)
+
+        factories = {
+            "marketplace": shell_marketplace_factory,
+            "auction": shell_auction_factory,
+            "voting": shell_voting_factory,
+            "consensus": shell_consensus_factory,
+            "supply_chain": shell_supply_chain_factory,
+            "reputation": shell_reputation_factory,
+        }
 
         task_type = self._config.task.type
-        if task_type == "marketplace":
-            return shell_marketplace_factory(self._config, plugins, backend=backend)
-        if task_type == "auction":
-            return shell_auction_factory(self._config, plugins, backend=backend)
-        if task_type == "voting":
-            return shell_voting_factory(self._config, plugins, backend=backend)
-
-        msg = f"No shell factory for task type {task_type!r}"
-        raise KeyError(msg)
+        factory_fn = factories.get(task_type)
+        if factory_fn is None:
+            msg = f"No shell factory for task type {task_type!r}"
+            raise KeyError(msg)
+        return factory_fn(self._config, plugins, backend=backend)
 
     async def run(self) -> Path:
         """Run the scenario and return the trace file path.

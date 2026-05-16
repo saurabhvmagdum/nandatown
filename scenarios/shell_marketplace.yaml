@@ -10,6 +10,7 @@ agents:
   count: 6
   brain: llm
   llm_model: mock
+  llm_provider: openai
   roles:
     - name: buyer
       count: 3

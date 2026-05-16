@@ -14,12 +14,15 @@ Example::
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from nest_core.sim.agent import AgentContext, StateMachineAgent
 from nest_core.types import AgentId
 
 from nest_shell.llm import LLMBackend
+
+if TYPE_CHECKING:
+    from nest_shell.templates import AgentTemplate
 
 _DEFAULT_SYSTEM_PROMPT = """\
 You are an agent in a multi-agent marketplace simulation.
@@ -102,11 +105,17 @@ class ShellAgent(StateMachineAgent):
         system_prompt: str | None = None,
         num_sellers: int = 10,
         rounds: int = 10,
+        template: AgentTemplate | None = None,
     ) -> None:
         self._id = agent_id
         self._role = role
         self._backend = backend
-        self._system_prompt = (system_prompt or _DEFAULT_SYSTEM_PROMPT).format(role=role)
+        if template is not None:
+            self._system_prompt = template.system_prompt
+        else:
+            self._system_prompt = (system_prompt or _DEFAULT_SYSTEM_PROMPT).format(
+                role=role
+            )
         self._history: list[dict[str, str]] = [
             {"role": "system", "content": self._system_prompt},
         ]
@@ -175,6 +184,36 @@ class ShellAgent(StateMachineAgent):
         return len(self._history)
 
 
+def _resolve_template(
+    config: Any,
+    role: str,
+    scenario: str,
+) -> AgentTemplate | None:
+    """Resolve a template for a given role, if configured.
+
+    Example::
+
+        tpl = _resolve_template(config, "buyer", "marketplace")
+    """
+    template_name: str = getattr(config.agents, "template", "")
+    if not template_name:
+        return None
+
+    from nest_shell.templates import TemplateRegistry
+
+    registry = TemplateRegistry()
+
+    if template_name == "auto":
+        try:
+            return registry.get_template(f"{scenario}-{role}")
+        except KeyError:
+            return None
+    try:
+        return registry.get_template(template_name)
+    except KeyError:
+        return None
+
+
 def shell_marketplace_factory(
     config: Any,
     plugins: dict[str, Any],
@@ -210,22 +249,26 @@ def shell_marketplace_factory(
 
     for i in range(seller_count):
         aid = AgentId(f"seller-{i}")
+        tpl = _resolve_template(config, "seller", "marketplace")
         agents[aid] = ShellAgent(
             agent_id=aid,
             role="seller",
             backend=backend,
             num_sellers=seller_count,
             rounds=rounds,
+            template=tpl,
         )
 
     for i in range(buyer_count):
         aid = AgentId(f"buyer-{i}")
+        tpl = _resolve_template(config, "buyer", "marketplace")
         agents[aid] = ShellAgent(
             agent_id=aid,
             role="buyer",
             backend=backend,
             num_sellers=seller_count,
             rounds=rounds,
+            template=tpl,
         )
 
     return agents

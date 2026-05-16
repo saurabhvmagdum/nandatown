@@ -3,12 +3,13 @@
 
 Example::
 
-    backend = LiteLLMBackend(model="gpt-4o-mini")
+    backend = OpenAIBackend(model="gpt-4o-mini")
     response = await backend.complete(messages)
 """
 
 from __future__ import annotations
 
+import warnings
 from typing import Protocol, runtime_checkable
 
 
@@ -33,8 +34,99 @@ class LLMBackend(Protocol):
         ...
 
 
+class OpenAIBackend:
+    """LLM backend using the OpenAI SDK.
+
+    Reads API key from ``OPENAI_API_KEY`` environment variable.
+
+    Example::
+
+        backend = OpenAIBackend(model="gpt-4o-mini", temperature=0.7)
+        response = await backend.complete(messages)
+    """
+
+    def __init__(
+        self,
+        model: str = "gpt-4o-mini",
+        temperature: float = 0.7,
+        max_tokens: int = 256,
+        api_key: str | None = None,
+    ) -> None:
+        self._model = model
+        self._temperature = temperature
+        self._max_tokens = max_tokens
+        self._api_key = api_key  # None = use env var
+
+    async def complete(self, messages: list[dict[str, str]]) -> str:
+        import openai  # pyright: ignore[reportMissingModuleSource]
+
+        client = openai.AsyncOpenAI(  # pyright: ignore[reportUnknownMemberType]
+            api_key=self._api_key,
+        )
+        response = await client.chat.completions.create(  # pyright: ignore[reportUnknownMemberType]
+            model=self._model,
+            messages=messages,  # pyright: ignore[reportArgumentType]
+            temperature=self._temperature,
+            max_tokens=self._max_tokens,
+        )
+        content: str = response.choices[0].message.content or ""  # pyright: ignore[reportUnknownMemberType]
+        return content
+
+
+class AnthropicBackend:
+    """LLM backend using the Anthropic SDK.
+
+    Reads API key from ``ANTHROPIC_API_KEY`` environment variable.
+
+    Example::
+
+        backend = AnthropicBackend(model="claude-sonnet-4-20250514")
+        response = await backend.complete(messages)
+    """
+
+    def __init__(
+        self,
+        model: str = "claude-sonnet-4-20250514",
+        temperature: float = 0.7,
+        max_tokens: int = 256,
+        api_key: str | None = None,
+    ) -> None:
+        self._model = model
+        self._temperature = temperature
+        self._max_tokens = max_tokens
+        self._api_key = api_key
+
+    async def complete(self, messages: list[dict[str, str]]) -> str:
+        import anthropic  # pyright: ignore[reportMissingImports]
+
+        client = anthropic.AsyncAnthropic(  # pyright: ignore[reportUnknownVariableType,reportUnknownMemberType]
+            api_key=self._api_key,
+        )
+        # Extract system message; Anthropic requires it as a separate parameter.
+        system = ""
+        chat_messages: list[dict[str, str]] = []
+        for m in messages:
+            if m["role"] == "system":
+                system = m["content"]
+            else:
+                chat_messages.append(m)
+        response: object = await client.messages.create(  # pyright: ignore[reportUnknownVariableType,reportUnknownMemberType]
+            model=self._model,
+            system=system,
+            messages=chat_messages,
+            temperature=self._temperature,
+            max_tokens=self._max_tokens,
+        )
+        content_blocks: list[object] = getattr(response, "content", [])  # pyright: ignore[reportUnknownArgumentType]
+        block: object = content_blocks[0] if content_blocks else None
+        return str(getattr(block, "text", "")) if block else ""
+
+
 class LiteLLMBackend:
     """LLM backend using litellm for multi-provider support.
+
+    .. deprecated::
+        Use :class:`OpenAIBackend` or :class:`AnthropicBackend` instead.
 
     Example::
 
@@ -48,6 +140,11 @@ class LiteLLMBackend:
         temperature: float = 0.7,
         max_tokens: int = 256,
     ) -> None:
+        warnings.warn(
+            "LiteLLMBackend is deprecated; use OpenAIBackend or AnthropicBackend instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self._model = model
         self._temperature = temperature
         self._max_tokens = max_tokens

@@ -41,6 +41,8 @@ class AgentConfig(BaseModel):
     count: int = 10
     brain: str = "state-machine"
     llm_model: str = "gpt-4o-mini"
+    llm_provider: str = "openai"  # "openai", "anthropic", or "mock"
+    template: str = ""
     roles: list[RoleConfig] = Field(default_factory=lambda: list[RoleConfig]())
 
 

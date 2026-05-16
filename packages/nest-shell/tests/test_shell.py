@@ -14,7 +14,7 @@ from nest_core.sim.simulator import Simulator
 from nest_core.types import AgentId
 from nest_shell.agent import ShellAgent, parse_action, shell_marketplace_factory
 from nest_shell.factories import shell_auction_factory, shell_voting_factory
-from nest_shell.llm import MockLLMBackend
+from nest_shell.llm import AnthropicBackend, LLMBackend, MockLLMBackend, OpenAIBackend
 
 
 class TestParseAction:
@@ -84,6 +84,33 @@ class TestMockLLMBackend:
             [{"role": "user", "content": "This is a special message"}]
         )
         assert "alert:critical" in response
+
+
+class TestOpenAIBackend:
+    def test_instantiation(self) -> None:
+        backend = OpenAIBackend()
+        assert isinstance(backend, LLMBackend)
+
+    def test_custom_params(self) -> None:
+        backend = OpenAIBackend(
+            model="gpt-4o", temperature=0.5, max_tokens=512, api_key="test-key"
+        )
+        assert isinstance(backend, LLMBackend)
+
+
+class TestAnthropicBackend:
+    def test_instantiation(self) -> None:
+        backend = AnthropicBackend()
+        assert isinstance(backend, LLMBackend)
+
+    def test_custom_params(self) -> None:
+        backend = AnthropicBackend(
+            model="claude-opus-4-20250514",
+            temperature=0.3,
+            max_tokens=1024,
+            api_key="test-key",
+        )
+        assert isinstance(backend, LLMBackend)
 
 
 class TestShellAgent:
@@ -441,6 +468,40 @@ class TestRunnerBrainDispatch:
         runner = ScenarioRunner(config)
         trace_path = await runner.run()
         assert trace_path.exists()
+
+    @pytest.mark.asyncio
+    async def test_runner_anthropic_provider_mock_model(self, tmp_path: Path) -> None:
+        """llm_provider='anthropic' with llm_model='mock' still uses MockLLMBackend."""
+        trace_file = tmp_path / "runner_anthro_mock.jsonl"
+        config = ScenarioConfig.from_dict(
+            {
+                "name": "runner-anthro-mock-test",
+                "seed": 42,
+                "agents": {
+                    "count": 4,
+                    "brain": "llm",
+                    "llm_model": "mock",
+                    "llm_provider": "anthropic",
+                    "roles": [
+                        {"name": "buyer", "count": 2},
+                        {"name": "seller", "count": 2},
+                    ],
+                },
+                "task": {"type": "marketplace", "config": {"rounds": 2}},
+                "duration": "ticks: 2000",
+                "output": {"trace": str(trace_file)},
+            }
+        )
+
+        assert config.agents.llm_provider == "anthropic"
+
+        runner = ScenarioRunner(config)
+        trace_path = await runner.run()
+
+        assert trace_path.exists()
+        content = trace_path.read_text()
+        lines = [ln for ln in content.strip().split("\n") if ln]
+        assert len(lines) > 0
 
     @pytest.mark.asyncio
     async def test_yaml_scenario_with_brain_llm(self, tmp_path: Path) -> None:

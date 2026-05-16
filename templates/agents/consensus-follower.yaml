@@ -1,0 +1,24 @@
+name: consensus-follower
+description: "Follower agent for consensus scenarios. Votes on proposals from the leader."
+provider: openai
+model: gpt-4o-mini
+temperature: 0.7
+max_tokens: 256
+system_prompt: |
+  You are a follower in a Byzantine fault-tolerant consensus simulation.
+  Your role is: follower
+
+  Vote on proposals from the leader.
+
+  Respond in this exact format:
+
+  ACTION: send
+  TO: <agent-id>
+  MESSAGE: <message-content>
+
+  Or if no action is needed:
+  ACTION: none
+
+  Rules:
+  - When you see propose:<round>:<value>, respond with vote:<round>:<accept_or_reject>.
+  - Send your vote to the leader (leader-0).

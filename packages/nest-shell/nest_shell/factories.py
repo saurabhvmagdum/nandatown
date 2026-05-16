@@ -18,7 +18,7 @@ from nest_core.scenario import ScenarioConfig
 from nest_core.sim.agent import StateMachineAgent
 from nest_core.types import AgentId
 
-from nest_shell.agent import ShellAgent
+from nest_shell.agent import ShellAgent, _resolve_template
 from nest_shell.llm import LLMBackend
 
 _AUCTION_AUCTIONEER_PROMPT = """\
@@ -160,6 +160,7 @@ def shell_auction_factory(
         bidder_count = config.agents.count - 1
 
     auctioneer_id = AgentId("auctioneer-0")
+    tpl = _resolve_template(config, "auctioneer", "auction")
     agents[auctioneer_id] = ShellAgent(
         agent_id=auctioneer_id,
         role="auctioneer",
@@ -167,10 +168,12 @@ def shell_auction_factory(
         system_prompt=_AUCTION_AUCTIONEER_PROMPT,
         num_sellers=bidder_count,
         rounds=rounds,
+        template=tpl,
     )
 
     for i in range(bidder_count):
         aid = AgentId(f"bidder-{i}")
+        tpl = _resolve_template(config, "bidder", "auction")
         agents[aid] = ShellAgent(
             agent_id=aid,
             role="bidder",
@@ -178,6 +181,7 @@ def shell_auction_factory(
             system_prompt=_AUCTION_BIDDER_PROMPT,
             num_sellers=bidder_count,
             rounds=rounds,
+            template=tpl,
         )
 
     return agents
@@ -217,6 +221,7 @@ def shell_voting_factory(
     proposer_id = AgentId("proposer-0")
     coordinator_id = AgentId("coordinator-0")
 
+    tpl_proposer = _resolve_template(config, "proposer", "voting")
     agents[proposer_id] = ShellAgent(
         agent_id=proposer_id,
         role="proposer",
@@ -224,7 +229,9 @@ def shell_voting_factory(
         system_prompt=_VOTING_PROPOSER_PROMPT,
         num_sellers=voter_count,
         rounds=rounds,
+        template=tpl_proposer,
     )
+    tpl_coord = _resolve_template(config, "coordinator", "voting")
     agents[coordinator_id] = ShellAgent(
         agent_id=coordinator_id,
         role="coordinator",
@@ -232,10 +239,12 @@ def shell_voting_factory(
         system_prompt=_VOTING_COORDINATOR_PROMPT,
         num_sellers=voter_count,
         rounds=rounds,
+        template=tpl_coord,
     )
 
     for i in range(voter_count):
         aid = AgentId(f"voter-{i}")
+        tpl_voter = _resolve_template(config, "voter", "voting")
         agents[aid] = ShellAgent(
             agent_id=aid,
             role="voter",
@@ -243,6 +252,7 @@ def shell_voting_factory(
             system_prompt=_VOTING_VOTER_PROMPT,
             num_sellers=voter_count,
             rounds=rounds,
+            template=tpl_voter,
         )
 
     return agents
@@ -326,6 +336,7 @@ def shell_consensus_factory(
         follower_count = config.agents.count - 1
 
     leader_id = AgentId("leader-0")
+    tpl_leader = _resolve_template(config, "leader", "consensus")
     agents[leader_id] = ShellAgent(
         agent_id=leader_id,
         role="leader",
@@ -333,10 +344,12 @@ def shell_consensus_factory(
         system_prompt=_CONSENSUS_LEADER_PROMPT,
         num_sellers=follower_count,
         rounds=rounds,
+        template=tpl_leader,
     )
 
     for i in range(follower_count):
         aid = AgentId(f"follower-{i}")
+        tpl_follower = _resolve_template(config, "follower", "consensus")
         agents[aid] = ShellAgent(
             agent_id=aid,
             role="follower",
@@ -344,6 +357,7 @@ def shell_consensus_factory(
             system_prompt=_CONSENSUS_FOLLOWER_PROMPT,
             num_sellers=follower_count,
             rounds=rounds,
+            template=tpl_follower,
         )
 
     return agents
@@ -462,6 +476,7 @@ def shell_supply_chain_factory(
         ("retailer", _SUPPLY_CHAIN_RETAILER_PROMPT),
     ]:
         aid = AgentId(f"{role_name}-0")
+        tpl_sc = _resolve_template(config, role_name, "supply-chain")
         agents[aid] = ShellAgent(
             agent_id=aid,
             role=role_name,
@@ -469,6 +484,7 @@ def shell_supply_chain_factory(
             system_prompt=prompt,
             num_sellers=1,
             rounds=rounds,
+            template=tpl_sc,
         )
 
     return agents

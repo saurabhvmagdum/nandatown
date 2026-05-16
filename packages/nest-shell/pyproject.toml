@@ -18,8 +18,13 @@ classifiers = [
 dependencies = [
     "nest-core",
     "nest-sdk",
-    "litellm>=1.0",
+    "openai>=1.0",
 ]
+
+[project.optional-dependencies]
+anthropic = ["anthropic>=0.30"]
+litellm = ["litellm>=1.0"]
+all = ["anthropic>=0.30", "litellm>=1.0"]
 
 [project.urls]
 Homepage = "https://github.com/mariagorskikh/nest"
