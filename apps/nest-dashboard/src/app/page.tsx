@@ -416,15 +416,15 @@ export default function Home() {
                   {exp.metrics && (
                     <div className="mt-5 grid grid-cols-2 gap-4 border-t border-warm-100 pt-5">
                       <div>
-                        <p className="text-xs text-warm-400">Success Rate</p>
+                        <p className="text-xs text-warm-400">Delivery Rate</p>
                         <p className="mt-1 text-lg font-bold text-warm-900">
-                          {exp.metrics.successRate}%
+                          {exp.metrics.deliveryRate}%
                         </p>
                       </div>
                       <div>
                         <p className="text-xs text-warm-400">Latency</p>
                         <p className="mt-1 text-lg font-bold text-warm-900">
-                          {exp.metrics.meanLatency}ms
+                          {exp.metrics.meanLatency} ticks
                         </p>
                       </div>
                     </div>

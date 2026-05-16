@@ -161,11 +161,17 @@ class ScenarioRunner:
             message_drop_rate=failures.message_drop,
             byzantine_fraction=failures.byzantine_agents,
             partition_groups=partition_groups,
+            plugins=plugins,
         )
 
         agents = self._create_agents(plugins)
         for agent_id, agent in agents.items():
             sim.add_agent(agent_id, agent)
+
+        # Apply per-agent plugin overrides set by scenario factories
+        agent_plugins: dict[str, Any] = plugins.pop("_agent_plugins", {})
+        for agent_id, overrides in agent_plugins.items():
+            sim.set_agent_plugins(agent_id, overrides)
 
         max_ticks = self._config.get_max_ticks()
         await sim.run(max_ticks=max_ticks)

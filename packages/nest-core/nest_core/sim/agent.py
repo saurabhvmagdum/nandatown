@@ -14,7 +14,7 @@ Example::
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from nest_core.types import AgentId
 
@@ -58,6 +58,21 @@ class AgentContext(Protocol):
         Example::
 
             val = ctx.rng.random()
+        """
+        ...
+
+    @property
+    def plugins(self) -> dict[str, Any]:
+        """Resolved layer plugin instances available to this agent.
+
+        Returns an empty dict when no plugins are configured, so agents
+        can fall back to direct messaging.
+
+        Example::
+
+            registry = ctx.plugins.get("registry")
+            if registry:
+                sellers = await registry.lookup(Query(capabilities=["sell"]))
         """
         ...
 

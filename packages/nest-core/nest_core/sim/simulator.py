@@ -58,6 +58,7 @@ class _SimAgentContext:
         rng: random.Random,
         trace: TraceWriter | None,
         corr_counter: _CorrelationCounter,
+        plugins: dict[str, Any] | None = None,
     ) -> None:
         self._agent_id = agent_id
         self._clock = clock
@@ -66,6 +67,7 @@ class _SimAgentContext:
         self._rng = rng
         self._trace = trace
         self._corr = corr_counter
+        self._plugins: dict[str, Any] = plugins or {}
 
     @property
     def agent_id(self) -> AgentId:
@@ -78,6 +80,10 @@ class _SimAgentContext:
     @property
     def rng(self) -> random.Random:
         return self._rng
+
+    @property
+    def plugins(self) -> dict[str, Any]:
+        return self._plugins
 
     async def send(self, to: AgentId, payload: bytes) -> None:
         cid = self._corr.next()
@@ -141,6 +147,7 @@ class Simulator:
         message_drop_rate: float = 0.0,
         byzantine_fraction: float = 0.0,
         partition_groups: list[list[str]] | None = None,
+        plugins: dict[str, Any] | None = None,
     ) -> None:
         self._seed = seed
         self._master_rng = random.Random(seed)
@@ -160,6 +167,8 @@ class Simulator:
         self._byzantine_agents: set[AgentId] = set()
         self._partition_map: dict[AgentId, int] = {}
         self._failure_rng = random.Random(self._master_rng.randint(0, 2**63))
+        self._plugins: dict[str, Any] = plugins or {}
+        self._agent_plugins: dict[AgentId, dict[str, Any]] = {}
 
     @property
     def clock(self) -> VirtualClock:
@@ -348,7 +357,18 @@ class Simulator:
         if self._trace:
             self._trace.close()
 
+    def set_agent_plugins(self, agent_id: AgentId, overrides: dict[str, Any]) -> None:
+        """Set per-agent plugin overrides (merged on top of shared plugins).
+
+        Example::
+
+            sim.set_agent_plugins(AgentId("a1"), {"identity": my_identity})
+        """
+        self._agent_plugins[agent_id] = overrides
+
     def _make_context(self, agent_id: AgentId, slot: _AgentSlot) -> _SimAgentContext:
+        agent_overrides = self._agent_plugins.get(agent_id)
+        merged = {**self._plugins, **agent_overrides} if agent_overrides else self._plugins
         return _SimAgentContext(
             agent_id=agent_id,
             clock=self._clock,
@@ -357,4 +377,5 @@ class Simulator:
             rng=slot.rng,
             trace=self._trace,
             corr_counter=self._corr_counter,
+            plugins=merged,
         )

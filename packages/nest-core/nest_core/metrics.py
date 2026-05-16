@@ -3,12 +3,13 @@
 
 Example::
 
-    results = compute_metrics(trace_path, ["success_rate", "mean_latency", "message_count"])
+    results = compute_metrics(trace_path, ["delivery_rate", "mean_latency", "message_count"])
 """
 
 from __future__ import annotations
 
 import json
+import re
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -22,7 +23,7 @@ def compute_metrics(
 
     Example::
 
-        results = compute_metrics("trace.jsonl", ["success_rate", "message_count"])
+        results = compute_metrics("trace.jsonl", ["delivery_rate", "message_count"])
     """
     trace_path = Path(trace_path)
     events = _load_events(trace_path)
@@ -46,7 +47,18 @@ def _load_events(path: Path) -> list[dict[str, Any]]:
     return events
 
 
-def _success_rate(events: list[dict[str, Any]]) -> float:
+# ---------------------------------------------------------------------------
+# Delivery rate (formerly called "success_rate" -- kept as alias for compat)
+# ---------------------------------------------------------------------------
+def _delivery_rate(events: list[dict[str, Any]]) -> float:
+    """Fraction of sent messages that were received (message delivery rate).
+
+    NOTE: This was previously named ``_success_rate``.  The old name was
+    misleading -- a 100 % delivery rate does NOT mean the protocol succeeded;
+    it only means every message was delivered, even if every request was
+    rejected.  The ``deal_rate`` metric captures actual protocol success for
+    marketplace scenarios.
+    """
     sends = 0
     receives = 0
     for ev in events:
@@ -60,6 +72,119 @@ def _success_rate(events: list[dict[str, Any]]) -> float:
     return receives / sends
 
 
+# Backward-compatible alias
+_success_rate = _delivery_rate
+
+
+# ---------------------------------------------------------------------------
+# Marketplace-specific metrics
+# ---------------------------------------------------------------------------
+_BUY_RE = re.compile(r"^buy:")
+_SOLD_RE = re.compile(r"^sold:")
+_REJECT_RE = re.compile(r"^reject:")
+
+
+def _deal_rate(events: list[dict[str, Any]]) -> float:
+    """Percentage of buy requests that resulted in a successful trade (``sold:``).
+
+    Only meaningful for marketplace scenarios.  Returns 0.0 when there are no
+    buy requests.
+    """
+    buy_count = 0
+    sold_count = 0
+    for ev in events:
+        if ev.get("kind") != "send":
+            continue
+        content = ev.get("content", "")
+        if _BUY_RE.match(content):
+            buy_count += 1
+        elif _SOLD_RE.match(content):
+            sold_count += 1
+    if buy_count == 0:
+        return 0.0
+    return sold_count / buy_count
+
+
+def _rejection_rate(events: list[dict[str, Any]]) -> float:
+    """Percentage of buy requests that received a ``reject:`` response.
+
+    Only meaningful for marketplace scenarios.  Returns 0.0 when there are no
+    buy requests.
+    """
+    buy_count = 0
+    reject_count = 0
+    for ev in events:
+        if ev.get("kind") != "send":
+            continue
+        content = ev.get("content", "")
+        if _BUY_RE.match(content):
+            buy_count += 1
+        elif _REJECT_RE.match(content):
+            reject_count += 1
+    if buy_count == 0:
+        return 0.0
+    return reject_count / buy_count
+
+
+def _mean_rounds_to_deal(events: list[dict[str, Any]]) -> float:
+    """Average number of message rounds before a successful ``sold:`` trade.
+
+    A "round" is counted as each buy/reject exchange between a unique
+    buyer-seller pair before the pair reaches a ``sold:`` message.  Returns
+    0.0 when there are no successful deals.
+    """
+    # Track ongoing negotiations per (buyer, seller) pair
+    pair_rounds: dict[tuple[str, str], int] = defaultdict(int)
+    deal_rounds: list[int] = []
+
+    for ev in events:
+        if ev.get("kind") != "send":
+            continue
+        content = ev.get("content", "")
+        agent = ev.get("agent", "")
+        to = ev.get("to", "")
+        frm = ev.get("from", agent)
+
+        if _BUY_RE.match(content):
+            pair_rounds[(frm, to)] += 1
+        elif _REJECT_RE.match(content):
+            # Rejection is seller -> buyer, count it as a round for (buyer, seller)
+            pair_rounds[(to, frm)] += 1
+        elif _SOLD_RE.match(content):
+            # sold is seller -> buyer
+            pair = (to, frm)
+            rounds = pair_rounds.get(pair, 0)
+            deal_rounds.append(max(rounds, 1))
+            # Reset for this pair in case they trade again
+            pair_rounds[pair] = 0
+
+    if not deal_rounds:
+        return 0.0
+    return sum(deal_rounds) / len(deal_rounds)
+
+
+def _unique_pairs(events: list[dict[str, Any]]) -> float:
+    """Number of unique agent pairs that exchanged at least one message."""
+    pairs: set[tuple[str, str]] = set()
+    for ev in events:
+        kind = ev.get("kind", "")
+        if kind not in ("send", "receive"):
+            continue
+        agent = ev.get("agent", "")
+        to = ev.get("to", "")
+        frm = ev.get("from", "")
+        if kind == "send" and agent and to:
+            pair = tuple(sorted((agent, to)))
+            pairs.add(pair)  # type: ignore[arg-type]
+        elif kind == "receive" and agent and frm:
+            pair = tuple(sorted((agent, frm)))
+            pairs.add(pair)  # type: ignore[arg-type]
+    return float(len(pairs))
+
+
+# ---------------------------------------------------------------------------
+# Core metrics
+# ---------------------------------------------------------------------------
 def _mean_latency(events: list[dict[str, Any]]) -> float:
     send_times: dict[str, float] = {}
     latencies: list[float] = []
@@ -130,13 +255,19 @@ def _per_agent_stats(events: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
 
 
 _METRIC_FUNCS: dict[str, Any] = {
-    "success_rate": _success_rate,
+    "delivery_rate": _delivery_rate,
+    "deal_rate": _deal_rate,
+    "rejection_rate": _rejection_rate,
+    "mean_rounds_to_deal": _mean_rounds_to_deal,
+    "unique_pairs": _unique_pairs,
     "mean_latency": _mean_latency,
     "message_count": _message_count,
     "dropped_count": _dropped_count,
     "agent_count": _agent_count,
     "duration": _duration,
     "throughput": _throughput,
+    # Backward compatibility: old name still works
+    "success_rate": _success_rate,
 }
 
 ALL_METRICS: list[str] = list(_METRIC_FUNCS.keys())
@@ -243,8 +374,8 @@ footer {{ margin-top: 3rem; padding-top: 1rem;
 {metrics.get("message_count", 0):.0f}\
 </div><div class="label">Messages</div></div>
 <div class="card"><div class="value">\
-{metrics.get("success_rate", 0):.1%}\
-</div><div class="label">Success Rate</div></div>
+{metrics.get("delivery_rate", metrics.get("success_rate", 0)):.1%}\
+</div><div class="label">Delivery Rate</div></div>
 <div class="card"><div class="value">\
 {metrics.get("mean_latency", 0):.2f}\
 </div><div class="label">Mean Latency</div></div>

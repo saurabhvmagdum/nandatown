@@ -35,7 +35,8 @@ agents:
 rounds: 10
 protocol: negotiation
 metrics:
-  - success_rate
+  - delivery_rate
+  - deal_rate
   - latency
   - throughput`,
   auction: `scenario: auction
@@ -46,7 +47,8 @@ rounds: 5
 protocol: sealed_bid
 reserve_price: 100
 metrics:
-  - success_rate
+  - delivery_rate
+  - deal_rate
   - price_convergence`,
   voting: `scenario: voting
 agents:
@@ -63,12 +65,12 @@ metrics:
 agents:
   leader: 1
   followers: 6
-fault_tolerance: 2
-protocol: bft
+quorum: 0.667
 rounds: 10
 metrics:
-  - agreement_rate
-  - latency`,
+  - delivery_rate
+  - message_count
+  - agent_count`,
   supply_chain: `scenario: supply_chain
 agents:
   supplier: 1
@@ -252,22 +254,22 @@ export default function ExperimentsPage() {
                     )}
                   </div>
 
-                  {/* Metrics Bar: Success Rate */}
+                  {/* Metrics Bar: Delivery Rate */}
                   {exp.metrics && (
                     <div className="mt-5">
                       <div className="flex items-center justify-between text-sm mb-1.5">
                         <span className="font-medium text-warm-600">
-                          Success Rate
+                          Delivery Rate
                         </span>
                         <span className="font-semibold text-warm-900">
-                          {exp.metrics.successRate}%
+                          {exp.metrics.deliveryRate}%
                         </span>
                       </div>
                       <div className="h-2 w-full rounded-full bg-warm-100">
                         <div
                           className="h-2 rounded-full transition-all duration-500"
                           style={{
-                            width: `${exp.metrics.successRate}%`,
+                            width: `${exp.metrics.deliveryRate}%`,
                             backgroundColor: color,
                           }}
                         />
@@ -308,12 +310,18 @@ export default function ExperimentsPage() {
                     </h3>
                     <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
                       <MetricCard
-                        label="Success Rate"
-                        value={`${exp.metrics.successRate}%`}
+                        label="Delivery Rate"
+                        value={`${exp.metrics.deliveryRate}%`}
                       />
+                      {exp.metrics.dealRate !== null && (
+                        <MetricCard
+                          label="Deal Rate"
+                          value={`${exp.metrics.dealRate}%`}
+                        />
+                      )}
                       <MetricCard
                         label="Mean Latency"
-                        value={`${exp.metrics.meanLatency}ms`}
+                        value={`${exp.metrics.meanLatency} ticks`}
                       />
                       <MetricCard
                         label="Messages"
@@ -321,7 +329,7 @@ export default function ExperimentsPage() {
                       />
                       <MetricCard
                         label="Throughput"
-                        value={`${exp.metrics.throughput}/s`}
+                        value={`${exp.metrics.throughput} msg/tick`}
                       />
                     </div>
 
@@ -331,18 +339,27 @@ export default function ExperimentsPage() {
                     </h3>
                     <div className="space-y-3">
                       <HorizontalBar
-                        label="Success Rate"
-                        value={exp.metrics.successRate}
+                        label="Delivery Rate"
+                        value={exp.metrics.deliveryRate}
                         max={100}
                         color={color}
                         suffix="%"
                       />
+                      {exp.metrics.dealRate !== null && (
+                        <HorizontalBar
+                          label="Deal Rate"
+                          value={exp.metrics.dealRate}
+                          max={100}
+                          color={color}
+                          suffix="%"
+                        />
+                      )}
                       <HorizontalBar
                         label="Latency"
                         value={exp.metrics.meanLatency}
-                        max={50}
+                        max={10}
                         color={color}
-                        suffix="ms"
+                        suffix=" ticks"
                       />
                       <HorizontalBar
                         label="Messages"
@@ -353,9 +370,9 @@ export default function ExperimentsPage() {
                       <HorizontalBar
                         label="Throughput"
                         value={exp.metrics.throughput}
-                        max={1000}
+                        max={50}
                         color={color}
-                        suffix="/s"
+                        suffix=" msg/tick"
                       />
                     </div>
 

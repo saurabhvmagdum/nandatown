@@ -1,10 +1,9 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import Link from 'next/link';
 import { leaderboardData, scenarioColors } from '@/lib/demo-data';
 
-type SortField = 'rank' | 'composite' | 'successRate' | 'latency' | 'agents';
+type SortField = 'rank' | 'deliveryRate' | 'dealRate' | 'latency' | 'agents';
 type SortDirection = 'asc' | 'desc';
 
 const scenarios = [
@@ -34,21 +33,6 @@ const scenarioLabel: Record<string, string> = {
   supply_chain: 'Supply Chain',
   reputation: 'Reputation',
 };
-
-function gradeColor(grade: string): string {
-  switch (grade) {
-    case 'A':
-      return 'text-emerald-600 bg-emerald-50 border-emerald-200';
-    case 'B':
-      return 'text-blue-600 bg-blue-50 border-blue-200';
-    case 'C':
-      return 'text-yellow-600 bg-yellow-50 border-yellow-200';
-    case 'D':
-      return 'text-orange-600 bg-orange-50 border-orange-200';
-    default:
-      return 'text-red-600 bg-red-50 border-red-200';
-  }
-}
 
 function medalEmoji(rank: number): string {
   if (rank === 1) return '\u{1F947}';
@@ -88,13 +72,13 @@ export default function LeaderboardPage() {
           aVal = a.rank;
           bVal = b.rank;
           break;
-        case 'composite':
-          aVal = a.composite;
-          bVal = b.composite;
+        case 'deliveryRate':
+          aVal = a.deliveryRate;
+          bVal = b.deliveryRate;
           break;
-        case 'successRate':
-          aVal = a.successRate;
-          bVal = b.successRate;
+        case 'dealRate':
+          aVal = a.dealRate ?? -1;
+          bVal = b.dealRate ?? -1;
           break;
         case 'latency':
           aVal = a.latency;
@@ -133,8 +117,8 @@ export default function LeaderboardPage() {
             Leaderboard
           </h1>
           <p className="mt-4 max-w-3xl text-lg leading-relaxed text-warm-500 animate-fade-in stagger-1">
-            Benchmark rankings across all scenarios. Composite score = 40%
-            success + 20% latency + 20% throughput + 20% reliability.
+            Benchmark rankings across all scenarios. Individual metrics are
+            shown side-by-side &mdash; no composite weighting.
           </p>
         </div>
       </section>
@@ -170,8 +154,8 @@ export default function LeaderboardPage() {
           {(
             [
               ['rank', 'Rank'],
-              ['composite', 'Composite Score'],
-              ['successRate', 'Success Rate'],
+              ['deliveryRate', 'Delivery Rate'],
+              ['dealRate', 'Deal Rate'],
               ['latency', 'Latency'],
               ['agents', 'Agents'],
             ] as [SortField, string][]
@@ -197,7 +181,7 @@ export default function LeaderboardPage() {
         {/* Table */}
         <div className="mt-8 animate-fade-in stagger-4">
           <div className="overflow-x-auto rounded-xl border border-warm-200 bg-white shadow-sm">
-            <table className="w-full min-w-[900px] text-left">
+            <table className="w-full min-w-[800px] text-left">
               <thead>
                 <tr className="border-b border-warm-200 bg-warm-50/80">
                   <th className="px-5 py-4 text-xs font-semibold uppercase tracking-wider text-warm-500">
@@ -213,19 +197,16 @@ export default function LeaderboardPage() {
                     Agents
                   </th>
                   <th className="px-5 py-4 text-xs font-semibold uppercase tracking-wider text-warm-500">
-                    Success Rate
+                    Delivery Rate
                   </th>
                   <th className="px-5 py-4 text-xs font-semibold uppercase tracking-wider text-warm-500">
-                    Latency
+                    Deal Rate
                   </th>
                   <th className="px-5 py-4 text-xs font-semibold uppercase tracking-wider text-warm-500">
-                    Throughput
+                    Latency (ticks)
                   </th>
                   <th className="px-5 py-4 text-xs font-semibold uppercase tracking-wider text-warm-500">
-                    Composite
-                  </th>
-                  <th className="px-5 py-4 text-xs font-semibold uppercase tracking-wider text-warm-500">
-                    Grade
+                    Throughput (msg/tick)
                   </th>
                   <th className="px-5 py-4 text-xs font-semibold uppercase tracking-wider text-warm-500">
                     Date
@@ -236,7 +217,7 @@ export default function LeaderboardPage() {
                 {filteredAndSorted.map((entry) => {
                   const medal = medalEmoji(entry.rank);
                   const badgeColor = scenarioColors[entry.scenario] || '#78716C';
-                  const barWidth = Math.min(entry.successRate, 100);
+                  const barWidth = Math.min(entry.deliveryRate, 100);
 
                   return (
                     <tr
@@ -275,11 +256,11 @@ export default function LeaderboardPage() {
                         </span>
                       </td>
 
-                      {/* Success Rate */}
+                      {/* Delivery Rate */}
                       <td className="px-5 py-4 whitespace-nowrap">
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-medium text-warm-900">
-                            {entry.successRate}%
+                            {entry.deliveryRate}%
                           </span>
                           <div className="h-1.5 w-16 rounded-full bg-warm-200">
                             <div
@@ -290,33 +271,26 @@ export default function LeaderboardPage() {
                         </div>
                       </td>
 
+                      {/* Deal Rate */}
+                      <td className="px-5 py-4 whitespace-nowrap">
+                        <span className="text-sm text-warm-700">
+                          {entry.dealRate !== null
+                            ? `${entry.dealRate}%`
+                            : '—'}
+                        </span>
+                      </td>
+
                       {/* Latency */}
                       <td className="px-5 py-4 whitespace-nowrap">
                         <span className="text-sm text-warm-700">
-                          {entry.latency} ms
+                          {entry.latency} ticks
                         </span>
                       </td>
 
                       {/* Throughput */}
                       <td className="px-5 py-4 whitespace-nowrap">
                         <span className="text-sm text-warm-700">
-                          {entry.throughput} msg/s
-                        </span>
-                      </td>
-
-                      {/* Composite Score */}
-                      <td className="px-5 py-4 whitespace-nowrap">
-                        <span className="text-lg font-bold text-warm-900">
-                          {entry.composite}
-                        </span>
-                      </td>
-
-                      {/* Grade */}
-                      <td className="px-5 py-4 whitespace-nowrap">
-                        <span
-                          className={`inline-flex h-8 w-8 items-center justify-center rounded-md border text-sm font-bold ${gradeColor(entry.grade)}`}
-                        >
-                          {entry.grade}
+                          {entry.throughput} msg/tick
                         </span>
                       </td>
 
@@ -333,7 +307,7 @@ export default function LeaderboardPage() {
                 {filteredAndSorted.length === 0 && (
                   <tr>
                     <td
-                      colSpan={10}
+                      colSpan={9}
                       className="px-5 py-16 text-center text-sm text-warm-400"
                     >
                       No entries match the selected filter.
@@ -345,75 +319,45 @@ export default function LeaderboardPage() {
           </div>
         </div>
 
-        {/* Scoring Explanation */}
+        {/* Reproducibility Note */}
         <div className="mt-10 animate-fade-in stagger-5">
           <div className="rounded-xl border border-warm-200 bg-white p-8 shadow-sm">
             <h2 className="text-lg font-semibold text-warm-900">
-              Scoring Methodology
+              About These Rankings
             </h2>
             <p className="mt-3 text-sm leading-relaxed text-warm-600">
-              The composite score reflects overall experiment quality across four
-              dimensions, each normalized to a 0&ndash;100 scale:
+              Rankings are based on Tier 1 reference simulations. Results are
+              deterministic and reproducible with the same seed. Tier 1 uses
+              virtual tick-based time with no transport failures, so delivery
+              rates are expected to be near 100%.
             </p>
-
-            <div className="mt-5 rounded-lg bg-warm-50 border border-warm-200 px-5 py-4 font-mono text-sm text-warm-800">
-              Composite = 0.4 &times; success_rate + 0.2 &times; latency_score +
-              0.2 &times; throughput_score + 0.2 &times; reliability
-            </div>
-
-            <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-5">
-              {[
-                { grade: 'A', range: '90 +', color: 'bg-emerald-50 border-emerald-200 text-emerald-700' },
-                { grade: 'B', range: '80 – 89', color: 'bg-blue-50 border-blue-200 text-blue-700' },
-                { grade: 'C', range: '70 – 79', color: 'bg-yellow-50 border-yellow-200 text-yellow-700' },
-                { grade: 'D', range: '60 – 69', color: 'bg-orange-50 border-orange-200 text-orange-700' },
-                { grade: 'F', range: 'Below 60', color: 'bg-red-50 border-red-200 text-red-700' },
-              ].map((item) => (
-                <div
-                  key={item.grade}
-                  className={`flex flex-col items-center rounded-lg border px-4 py-3 ${item.color}`}
-                >
-                  <span className="text-xl font-bold">{item.grade}</span>
-                  <span className="mt-1 text-xs font-medium">{item.range}</span>
-                </div>
-              ))}
-            </div>
 
             <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {[
                 {
-                  label: 'Success Rate',
-                  weight: '40%',
-                  desc: 'Percentage of tasks completed successfully.',
+                  label: 'Delivery Rate',
+                  desc: 'Fraction of sent messages that were received. Not a measure of protocol success.',
                 },
                 {
-                  label: 'Latency Score',
-                  weight: '20%',
-                  desc: 'Inversely proportional to mean response time.',
+                  label: 'Deal Rate',
+                  desc: 'Percentage of buy requests that resulted in a successful trade. Marketplace/auction only.',
                 },
                 {
-                  label: 'Throughput Score',
-                  weight: '20%',
-                  desc: 'Messages processed per second, normalized.',
+                  label: 'Latency',
+                  desc: 'Mean ticks between send and receive for correlated message pairs.',
                 },
                 {
-                  label: 'Reliability',
-                  weight: '20%',
-                  desc: 'Uptime and fault-tolerance during the run.',
+                  label: 'Throughput',
+                  desc: 'Messages processed per tick across all agents.',
                 },
               ].map((metric) => (
                 <div
                   key={metric.label}
                   className="rounded-lg border border-warm-200 bg-warm-50/50 p-4"
                 >
-                  <div className="flex items-baseline justify-between">
-                    <span className="text-sm font-semibold text-warm-900">
-                      {metric.label}
-                    </span>
-                    <span className="text-xs font-bold text-crimson">
-                      {metric.weight}
-                    </span>
-                  </div>
+                  <span className="text-sm font-semibold text-warm-900">
+                    {metric.label}
+                  </span>
                   <p className="mt-1 text-xs text-warm-500">{metric.desc}</p>
                 </div>
               ))}

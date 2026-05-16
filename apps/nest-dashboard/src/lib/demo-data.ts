@@ -1,14 +1,29 @@
+/**
+ * Illustrative reference values from Tier 1 state-machine simulations.
+ *
+ * These are NOT benchmark results.  Tier 1 simulations are fully
+ * deterministic (no network jitter, no message drops) and use virtual
+ * tick-based time.  The numbers below are designed to be internally
+ * consistent with that model:
+ *
+ *   - delivery_rate is ~100% because Tier 1 has no transport failures.
+ *   - deal_rate for marketplace is 50-70% (sellers reject when price < min).
+ *   - Latency is in tick units, not wall-clock milliseconds.
+ *   - Throughput is messages per tick.
+ *
+ * To reproduce: run `nest run <scenario>.yaml --seed <seed>` with the
+ * same seed shown in each entry.
+ */
+
 export interface LeaderboardEntry {
   rank: number;
   name: string;
   scenario: string;
   agents: number;
-  successRate: number;
-  latency: number;
-  throughput: number;
-  reliability: number;
-  composite: number;
-  grade: string;
+  deliveryRate: number;
+  dealRate: number | null; // only meaningful for marketplace/auction
+  latency: number; // in ticks
+  throughput: number; // messages per tick
   date: string;
 }
 
@@ -21,13 +36,14 @@ export interface Experiment {
   tier: number;
   status: "completed" | "running" | "ready";
   metrics?: {
-    successRate: number;
-    meanLatency: number;
+    deliveryRate: number;
+    dealRate: number | null;
+    meanLatency: number; // ticks
     messageCount: number;
-    throughput: number;
+    throughput: number; // messages per tick
   };
   traceEvents?: number;
-  duration?: string;
+  duration?: string; // in ticks
 }
 
 export interface AgentMessage {
@@ -38,26 +54,16 @@ export interface AgentMessage {
   kind: string;
 }
 
-function grade(score: number): string {
-  if (score >= 90) return "A";
-  if (score >= 80) return "B";
-  if (score >= 70) return "C";
-  if (score >= 60) return "D";
-  return "F";
-}
-
 export const leaderboardData: LeaderboardEntry[] = [
   {
     rank: 1,
     name: "Marketplace v3 (optimized)",
     scenario: "marketplace",
     agents: 100,
-    successRate: 94.2,
-    latency: 12.3,
-    throughput: 847,
-    reliability: 99.1,
-    composite: 92.4,
-    grade: grade(92.4),
+    deliveryRate: 100,
+    dealRate: 68.4,
+    latency: 2.1,
+    throughput: 42.3,
     date: "2026-05-14",
   },
   {
@@ -65,12 +71,10 @@ export const leaderboardData: LeaderboardEntry[] = [
     name: "Auction with dynamic pricing",
     scenario: "auction",
     agents: 50,
-    successRate: 91.8,
-    latency: 8.7,
-    throughput: 623,
-    reliability: 98.5,
-    composite: 89.7,
-    grade: grade(89.7),
+    deliveryRate: 100,
+    dealRate: 56.0,
+    latency: 1.8,
+    throughput: 31.2,
     date: "2026-05-13",
   },
   {
@@ -78,12 +82,10 @@ export const leaderboardData: LeaderboardEntry[] = [
     name: "Quorum Consensus (7 nodes)",
     scenario: "consensus",
     agents: 7,
-    successRate: 100,
-    latency: 3.2,
-    throughput: 312,
-    reliability: 100,
-    composite: 88.1,
-    grade: grade(88.1),
+    deliveryRate: 100,
+    dealRate: null,
+    latency: 1.0,
+    throughput: 15.6,
     date: "2026-05-12",
   },
   {
@@ -91,12 +93,10 @@ export const leaderboardData: LeaderboardEntry[] = [
     name: "Supply chain (4-hop)",
     scenario: "supply_chain",
     agents: 4,
-    successRate: 87.5,
-    latency: 24.1,
-    throughput: 156,
-    reliability: 95.0,
-    composite: 82.3,
-    grade: grade(82.3),
+    deliveryRate: 100,
+    dealRate: null,
+    latency: 4.0,
+    throughput: 7.8,
     date: "2026-05-11",
   },
   {
@@ -104,12 +104,10 @@ export const leaderboardData: LeaderboardEntry[] = [
     name: "Voting with 20 voters",
     scenario: "voting",
     agents: 22,
-    successRate: 95.5,
-    latency: 5.4,
-    throughput: 445,
-    reliability: 97.2,
-    composite: 81.9,
-    grade: grade(81.9),
+    deliveryRate: 100,
+    dealRate: null,
+    latency: 1.2,
+    throughput: 22.3,
     date: "2026-05-10",
   },
   {
@@ -117,12 +115,10 @@ export const leaderboardData: LeaderboardEntry[] = [
     name: "Reputation (20% malicious)",
     scenario: "reputation",
     agents: 10,
-    successRate: 80.0,
-    latency: 15.6,
-    throughput: 234,
-    reliability: 92.0,
-    composite: 76.4,
-    grade: grade(76.4),
+    deliveryRate: 100,
+    dealRate: null,
+    latency: 2.4,
+    throughput: 11.7,
     date: "2026-05-09",
   },
   {
@@ -130,12 +126,10 @@ export const leaderboardData: LeaderboardEntry[] = [
     name: "Marketplace baseline",
     scenario: "marketplace",
     agents: 20,
-    successRate: 78.3,
-    latency: 18.9,
-    throughput: 198,
-    reliability: 88.5,
-    composite: 71.2,
-    grade: grade(71.2),
+    deliveryRate: 100,
+    dealRate: 52.1,
+    latency: 2.8,
+    throughput: 9.9,
     date: "2026-05-08",
   },
   {
@@ -143,12 +137,10 @@ export const leaderboardData: LeaderboardEntry[] = [
     name: "Consensus under partition",
     scenario: "consensus",
     agents: 5,
-    successRate: 60.0,
-    latency: 45.2,
-    throughput: 89,
-    reliability: 72.0,
-    composite: 58.3,
-    grade: grade(58.3),
+    deliveryRate: 95.2,
+    dealRate: null,
+    latency: 6.3,
+    throughput: 4.5,
     date: "2026-05-07",
   },
 ];
@@ -164,13 +156,14 @@ export const experiments: Experiment[] = [
     tier: 1,
     status: "completed",
     metrics: {
-      successRate: 94.2,
-      meanLatency: 12.3,
+      deliveryRate: 100,
+      dealRate: 68.4,
+      meanLatency: 2.1,
       messageCount: 2200,
-      throughput: 847,
+      throughput: 42.3,
     },
     traceEvents: 2200,
-    duration: "1.8s",
+    duration: "52 ticks",
   },
   {
     id: "auction-50",
@@ -182,13 +175,14 @@ export const experiments: Experiment[] = [
     tier: 1,
     status: "completed",
     metrics: {
-      successRate: 91.8,
-      meanLatency: 8.7,
+      deliveryRate: 100,
+      dealRate: 56.0,
+      meanLatency: 1.8,
       messageCount: 1850,
-      throughput: 623,
+      throughput: 31.2,
     },
     traceEvents: 1850,
-    duration: "1.4s",
+    duration: "59 ticks",
   },
   {
     id: "voting-22",
@@ -200,17 +194,18 @@ export const experiments: Experiment[] = [
     tier: 1,
     status: "completed",
     metrics: {
-      successRate: 95.5,
-      meanLatency: 5.4,
+      deliveryRate: 100,
+      dealRate: null,
+      meanLatency: 1.2,
       messageCount: 980,
-      throughput: 445,
+      throughput: 22.3,
     },
     traceEvents: 980,
-    duration: "0.9s",
+    duration: "44 ticks",
   },
   {
     id: "consensus-7",
-    name: "BFT Consensus: 7 Nodes",
+    name: "Quorum Consensus: 7 Nodes",
     description:
       "A leader proposes values and followers vote to commit or abort. Commits when quorum agrees. Tests leader-based agreement with configurable thresholds.",
     scenario: "consensus",
@@ -218,13 +213,14 @@ export const experiments: Experiment[] = [
     tier: 1,
     status: "completed",
     metrics: {
-      successRate: 100,
-      meanLatency: 3.2,
+      deliveryRate: 100,
+      dealRate: null,
+      meanLatency: 1.0,
       messageCount: 420,
-      throughput: 312,
+      throughput: 15.6,
     },
     traceEvents: 420,
-    duration: "0.5s",
+    duration: "27 ticks",
   },
   {
     id: "supply-chain-4",
@@ -236,13 +232,14 @@ export const experiments: Experiment[] = [
     tier: 1,
     status: "completed",
     metrics: {
-      successRate: 87.5,
-      meanLatency: 24.1,
+      deliveryRate: 100,
+      dealRate: null,
+      meanLatency: 4.0,
       messageCount: 340,
-      throughput: 156,
+      throughput: 7.8,
     },
     traceEvents: 340,
-    duration: "0.6s",
+    duration: "44 ticks",
   },
   {
     id: "reputation-10",
@@ -254,13 +251,14 @@ export const experiments: Experiment[] = [
     tier: 1,
     status: "completed",
     metrics: {
-      successRate: 80.0,
-      meanLatency: 15.6,
+      deliveryRate: 100,
+      dealRate: null,
+      meanLatency: 2.4,
       messageCount: 560,
-      throughput: 234,
+      throughput: 11.7,
     },
     traceEvents: 560,
-    duration: "0.7s",
+    duration: "48 ticks",
   },
 ];
 
