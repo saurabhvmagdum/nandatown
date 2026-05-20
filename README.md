@@ -44,9 +44,9 @@ Scenario YAML --> Plugin Resolution --> Agent Creation --> Discrete-Event Simula
 Key design decisions:
 
 - **Deterministic seeded RNG.** A master RNG seeded once at startup derives per-agent RNGs and a separate failure-injection RNG. Same seed = identical trace, regardless of host platform or execution timing.
-- **Virtual clock with event priority queue.** Events are ordered by `(time, sequence)` in a min-heap. The clock advances only when the next event is popped. No wall-clock dependency.
+- **Event priority queue with logical ordering.** Events are ordered by `(time, sequence)` in a min-heap; the virtual clock advances only when events with `time > now` are popped. Note: the bundled `in_memory` transport delivers messages at `time = now` (zero-latency hop), so unless agents explicitly call `ctx.schedule(delay, ...)` the clock stays at `0.0` and the trace captures only *event ordering*, not wall-clock latency. To get latency numbers, write a transport plugin (or `schedule`) that introduces per-hop delay.
 - **Per-agent RNG isolation.** Each agent receives its own `random.Random` instance derived from the master seed. Adding or removing agents does not change other agents' random sequences.
-- **Correlation IDs.** Every message is tagged with a monotonically increasing correlation ID, enabling end-to-end latency tracking across the trace.
+- **Correlation IDs.** Every message is tagged with a monotonically increasing correlation ID, enabling end-to-end pairing of sends and receives in the trace.
 - **Failure injection.** Three failure modes are configurable per scenario:
   - *Message drops:* probabilistic per-message drop rate
   - *Byzantine agents:* a fraction of agents have their payloads garbled (XOR with random bytes)
@@ -86,7 +86,7 @@ NEST ships with seven reference scenarios. Each is a YAML file that configures a
 
 | Scenario | Agents | What it tests | Notes |
 |---|---|---|---|
-| `marketplace` | 50 buyers, 50 sellers | Price negotiation via bilateral messaging. Buyers send offers; sellers accept/reject based on a minimum price threshold. | Exercises negotiation, payments, and registry layers. |
+| `marketplace` | 50 buyers, 50 sellers | Price negotiation via bilateral messaging. Buyers send offers; sellers accept/reject based on a minimum price threshold. | Exercises negotiation, payments, and registry layers. The default seller has no inventory model (it accepts every offer at or above `min_price`), so the `marketplace_no_double_sell` validator is provided as a property test for *user-written* marketplace scenarios that do track inventory. |
 | `auction` | 1 auctioneer, 19 bidders | Sealed-bid auction with multiple rounds. Auctioneer announces items; highest bidder wins each round. | Tests coordination and multi-round messaging. |
 | `voting` | 1 proposer, 1 coordinator, 18 voters | Majority-threshold voting. Proposer broadcasts proposals; voters send yes/no to coordinator; coordinator tallies and announces results. | Simple majority rule, not BFT. |
 | `consensus` | 1 leader, 19 followers | Leader-based quorum voting with configurable quorum threshold (default 2/3). Leader proposes values; followers vote accept/reject; leader commits if quorum is reached. | Simplified quorum protocol. Not a full BFT implementation -- useful for testing quorum-based agreement patterns. |
@@ -129,14 +129,16 @@ All default plugins are reference implementations intended for testing. They pri
 
 NEST includes protocol validators (`nest_core.validators`) that check scenario-specific correctness invariants against JSONL traces -- not just message counts, but actual protocol properties.
 
+> **Note.** Validators are property-checkers, not scenario certifications. Several bundled reference scenarios are deliberately minimal (e.g. the default marketplace seller has no inventory and the reputation observer reports a sampled subset of cheats), so running a validator against a reference trace can legitimately report `FAIL`. That is by design — the validators are intended for use against scenarios you build, including hardened variants of the reference scenarios.
+
 | Scenario | Validators |
 |---|---|
-| Marketplace | No double-sell (same product to two buyers); every buy request gets a sold/reject response; sale prices match offered prices. |
+| Marketplace | No double-sell (same product to two buyers); every buy request gets a sold/reject response; sale prices match offered prices. *(The bundled marketplace scenario does not model inventory and will fail the no-double-sell check by design — use this validator on your own inventory-aware scenarios.)* |
 | Auction | Winner has the highest bid; exactly one winner per item; all bidders notified of outcome. |
 | Voting | Announced tally matches actual vote count; every vote is counted; no voter votes twice per round. |
 | Consensus | Committed rounds have >= 2/3 accept votes; only proposed values are committed; at most one value committed per round. |
 | Supply chain | Delivered goods trace through all four pipeline hops; no materials lost in transit. |
-| Reputation | Cheating agents receive bad reports; agents with score <= -3 are warned. |
+| Reputation | Cheating agents receive bad reports; agents with score <= -3 are warned. *(The observer in the bundled scenario samples reports probabilistically, so a single un-reported cheater is possible in a given trace; the warning invariant still holds.)* |
 
 ```bash
 # Run validators programmatically
@@ -150,10 +152,10 @@ for r in results:
 
 | Tier | Agent type | Clock | Scale | Deterministic | Use case |
 |---|---|---|---|---|---|
-| **Tier 1** | State-machine (`StateMachineAgent`) | Virtual (discrete-event) | 10,000+ agents | Yes | Protocol correctness testing, parameter sweeps, regression benchmarks. |
-| **Tier 2** (Experimental) | LLM-backed (`ShellAgent`) via OpenAI/Anthropic SDK | Virtual (discrete-event) | 10--100 agents | No | Exploring emergent behavior with language model agents. Not suitable for reproducible benchmarks. |
+| **Tier 1** | State-machine (`StateMachineAgent`) | Logical event ordering (virtual clock; advances only on `schedule(delay, ...)` or a delay-modeling transport) | 10,000+ agents | Yes | Protocol correctness testing, parameter sweeps, regression benchmarks. |
+| **Tier 2** (Experimental) | LLM-backed (`ShellAgent`) via OpenAI/Anthropic SDK | Same as Tier 1 | 10--100 agents | No | Exploring emergent behavior with language model agents. Not suitable for reproducible benchmarks. |
 
-Tier 2 agents use the same simulator, virtual clock, and trace format as Tier 1. The difference is that agent decisions are delegated to an LLM backend (or a mock backend for CI). Because LLM outputs are non-deterministic, Tier 2 traces are not reproducible across runs even with the same seed.
+Tier 2 agents use the same simulator, event queue, and trace format as Tier 1. The difference is that agent decisions are delegated to an LLM backend (or a mock backend for CI). Because LLM outputs are non-deterministic, Tier 2 traces are not reproducible across runs even with the same seed.
 
 ## Writing a Plugin
 
@@ -214,7 +216,9 @@ nest/
 ## Limitations
 
 - **Reference plugins are simplified.** The default plugins are intended for testing protocol interactions, not production use. For example, the identity plugin uses HMAC-SHA256 instead of Ed25519, the auth plugin is not standards-compliant JWT, and the privacy plugin is a no-op passthrough.
-- **Scenarios test messaging patterns, not formal protocol properties.** The built-in scenarios verify that agents exchange the right messages in the right order, and metrics (success rate, latency, throughput) are computed from traces. There is no formal verification, model checking, or TLA+ integration.
+- **Default transport is zero-latency.** The bundled `in_memory` transport delivers messages at `time = now`, so the virtual clock stays at `0.0` and `mean_latency`/`duration` will report `0.0` for traces produced with it. Latency metrics become meaningful only when agents use `ctx.schedule(delay, ...)` or a custom transport plugin that introduces per-hop delay.
+- **Scenarios test messaging patterns, not formal protocol properties.** The built-in scenarios verify that agents exchange the right messages in the right order, and metrics (delivery rate, message count, throughput) are computed from traces. There is no formal verification, model checking, or TLA+ integration.
+- **Reference scenarios are minimal baselines.** The bundled scenarios are intended as starting points for layer/plugin testing — not as proofs of correctness. Some validators (e.g. `marketplace_no_double_sell`) will report `FAIL` against the bundled trace because the reference scenario does not model the property the validator checks. Run validators against your own hardened scenarios.
 - **Tier 2 (LLM) agents are experimental and non-deterministic.** LLM-backed agents are useful for exploring how language models behave in multi-agent settings, but traces are not reproducible and should not be used for benchmarking.
 - **Single-process only.** The simulator runs in a single Python process. There is no distributed execution or multi-node support.
 - **No real networking.** The transport layer is in-memory. There is no TCP, HTTP, or gRPC transport plugin yet.

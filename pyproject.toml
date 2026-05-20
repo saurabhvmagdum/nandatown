@@ -18,7 +18,6 @@ classifiers = [
 dependencies = [
     "nest-core",
     "nest-sdk",
-    "nest-cli",
     "nest-mocks",
     "nest-scenarios",
     "nest-shell",
@@ -47,6 +46,9 @@ dev-dependencies = [
     "hypothesis>=6.100",
     "ruff>=0.4",
     "pyright>=1.1",
+    # nest-cli is a deprecated shim — only installed for the dev test suite
+    # so the shim's smoke tests can import it.
+    "nest-cli",
 ]
 
 [tool.uv.sources]

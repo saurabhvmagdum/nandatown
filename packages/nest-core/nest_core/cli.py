@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import typer
+from pydantic import ValidationError
 
 app = typer.Typer(
     name="nest",
@@ -46,7 +47,14 @@ def run(
         typer.echo(f"Error: scenario file not found: {scenario}", err=True)
         raise typer.Exit(1)
 
-    config = ScenarioConfig.from_yaml(path)
+    try:
+        config = ScenarioConfig.from_yaml(path)
+    except ValidationError as e:
+        typer.echo(f"Error: invalid scenario {scenario}:", err=True)
+        for err in e.errors():
+            loc = ".".join(str(p) for p in err["loc"])
+            typer.echo(f"  {loc}: {err['msg']}", err=True)
+        raise typer.Exit(1) from None
 
     if seed is not None:
         config.seed = seed
@@ -55,9 +63,22 @@ def run(
     if output is not None:
         config.output.trace = output
 
+    max_ticks = config.get_max_ticks()
+    if max_ticks <= 0:
+        typer.echo(
+            f"Error: duration must resolve to a positive tick count (got {max_ticks}).",
+            err=True,
+        )
+        raise typer.Exit(1)
+    if config.agents.count < 0:
+        typer.echo(
+            f"Error: agents.count must be >= 0 (got {config.agents.count}).",
+            err=True,
+        )
+        raise typer.Exit(1)
+
     typer.echo(f"Running scenario: {config.name}")
-    ticks = config.get_max_ticks()
-    typer.echo(f"  agents: {config.agents.count}  seed: {config.seed}  ticks: {ticks}")
+    typer.echo(f"  agents: {config.agents.count}  seed: {config.seed}  ticks: {max_ticks}")
 
     trace_path = asyncio.run(_run_scenario(config))
     typer.echo(f"Trace written to: {trace_path}")
@@ -306,8 +327,16 @@ def dashboard(
             typer.echo(f"Error: trace file not found: {trace}", err=True)
             raise typer.Exit(1)
         trace_text = trace_path.read_text(encoding="utf-8")
-        # Escape for safe embedding inside JS string literal
-        escaped = trace_text.replace("\\", "\\\\").replace("`", "\\`").replace("$", "\\$")
+        # The dashboard reads the trace into a double-quoted JS string literal,
+        # so we must escape backslashes, double quotes, newlines, carriage
+        # returns, and the </script> sequence that would break out of the tag.
+        escaped = (
+            trace_text.replace("\\", "\\\\")
+            .replace('"', '\\"')
+            .replace("\r", "\\r")
+            .replace("\n", "\\n")
+            .replace("</", "<\\/")
+        )
         html_content = html_content.replace("__NEST_TRACE_DATA__", escaped)
 
     # Serve from a temporary directory with the (possibly modified) HTML
@@ -399,12 +428,12 @@ def plugins_list(
 def _require_shell() -> None:
     try:
         import nest_shell  # noqa: F401
-    except ImportError:
+    except ImportError as e:
         typer.echo(
             'Error: nest-shell is not installed. Run: pip install "nest-core[llm]"',
             err=True,
         )
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
 
 @templates_app.command("list")

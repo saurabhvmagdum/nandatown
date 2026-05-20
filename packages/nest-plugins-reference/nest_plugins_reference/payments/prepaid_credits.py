@@ -96,7 +96,10 @@ class PrepaidCredits:
 
         payee_balance = self._balances.get(receipt.payee, 0)
         if payee_balance < receipt.amount.amount:
-            msg = f"Insufficient balance for refund: {receipt.payee} has {payee_balance}, needs {receipt.amount.amount}"
+            msg = (
+                f"Insufficient balance for refund: {receipt.payee} has "
+                f"{payee_balance}, needs {receipt.amount.amount}"
+            )
             raise ValueError(msg)
 
         self._balances[receipt.payee] = payee_balance - receipt.amount.amount

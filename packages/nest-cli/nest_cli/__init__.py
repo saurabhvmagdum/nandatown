@@ -1,4 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""NEST CLI: command-line interface for running scenarios and managing plugins."""
+"""Deprecated shim package — use ``nest_core.cli`` instead.
 
-__version__ = "0.1.0"
+This package no longer ships a console script; the ``nest`` binary is now
+provided by ``nest-core``.  ``nest_cli.main:app`` still re-exports the
+core CLI so legacy entry points continue to function.
+"""
+
+__version__ = "0.1.1"

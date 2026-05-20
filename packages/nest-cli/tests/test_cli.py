@@ -13,9 +13,11 @@ runner = CliRunner()
 
 class TestVersion:
     def test_version_output(self) -> None:
+        from nest_core import __version__ as core_version
+
         result = runner.invoke(app, ["version"])
         assert result.exit_code == 0
-        assert "0.1.0" in result.output
+        assert core_version in result.output
 
 
 class TestDoctor:

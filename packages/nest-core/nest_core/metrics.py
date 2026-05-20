@@ -231,11 +231,16 @@ def _duration(events: list[dict[str, Any]]) -> float:
 
 
 def _throughput(events: list[dict[str, Any]]) -> float:
+    """Messages per unit virtual-time.
+
+    Returns ``0.0`` when the trace has zero observed duration -- which is the
+    common case for the bundled zero-latency transport.  Reporting raw message
+    count here would silently masquerade as a rate.
+    """
     dur = _duration(events)
-    msgs = _message_count(events)
     if dur <= 0:
-        return msgs
-    return msgs / dur
+        return 0.0
+    return _message_count(events) / dur
 
 
 def _per_agent_stats(events: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
