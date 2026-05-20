@@ -510,35 +510,6 @@ export default function AgentsPage() {
         </div>
       </section>
 
-      {/* Method note */}
-      <section className="border-t border-warm-200 bg-white">
-        <div className="mx-auto max-w-3xl px-6 py-16 text-warm-600 leading-7">
-          <p className="text-[11px] font-mono uppercase tracking-widest text-warm-400">
-            Method
-          </p>
-          <p className="mt-3 font-serif text-2xl leading-snug text-warm-900">
-            How this map is drawn.
-          </p>
-          <p className="mt-5 text-sm">
-            The world coastline is rendered from the public-domain
-            Natural&nbsp;Earth dataset (1:110m), projected with{" "}
-            <code className="font-mono text-[12px] text-warm-800">geoNaturalEarth1</code>.
-            Agents are placed deterministically: each cluster centroid sits at
-            its real city coordinates, and individual agent dots are
-            scattered within ~1.6° using a string-seeded PRNG so the layout is
-            identical on every reload.
-          </p>
-          <p className="mt-4 text-sm">
-            Message lines are sampled uniformly from the set of ordered cluster
-            pairs and drawn with a cubic ease so the head appears to travel
-            along the great-circle approximation between two cities. The tail
-            fades over one second. No data is fetched from the testbed yet —
-            this page is a visualization stub that an{" "}
-            <code className="font-mono text-[12px] text-warm-800">/api/agents</code>{" "}
-            endpoint can drop into without changing the rendering layer.
-          </p>
-        </div>
-      </section>
     </div>
   );
 }
