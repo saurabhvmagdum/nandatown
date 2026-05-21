@@ -1,21 +1,40 @@
 # Writing a scenario
 
-## Overview
+A scenario YAML pins together: how many agents, which plugin to use for
+each of the 12 layers, what task they run, what failures to inject, how
+long to run, and where to write the trace.
 
-A scenario is a YAML file that defines an experiment. It specifies agents, layer plugins, tasks, failure injection, and metrics.
+The fastest way to get a valid scenario is to copy a built-in one and
+edit it:
 
-## Scenario structure
+```bash
+nest scenarios cp marketplace ./my.yaml
+nest run ./my.yaml
+```
+
+This page is the reference for what each field does.
+
+## Full schema, with defaults
 
 ```yaml
-name: my-scenario
-description: What this scenario tests.
+# SPDX-License-Identifier: Apache-2.0
+name: my_scenario                   # required, becomes the trace filename if `output.trace` is unset
+description: "What this tests."     # optional, free text
 
-tier: 1                    # 1, 2, or 3
+tier: 1                             # 1 (state-machine) or 2 (LLM-backed). No tier 3.
+seed: 42                            # required; same seed → identical trace
+
 agents:
-  count: 100
-  brain: state-machine     # or a model name for Tier 2
+  count: 100                        # total number of agents
+  brain: state-machine              # or `shell` for tier 2
+  # llm_provider: anthropic         # required only when brain=shell. one of: anthropic | openai | mock
+  roles:                            # optional; sums must equal `count`
+    - name: buyer
+      count: 50
+    - name: seller
+      count: 50
 
-layers:
+layers:                             # any layer left out uses the built-in default
   transport: in_memory
   comms: nest_native
   identity: did_key
@@ -30,30 +49,107 @@ layers:
   datafacts: datafacts_v1
 
 task:
-  type: marketplace
-  config:
-    rounds: 50
+  type: marketplace                 # one of the built-in task types (see below)
+  config:                           # task-specific knobs, free-form dict
+    rounds: 10
+    catalog_size: 200
 
-failures:
-  message_drop: 0.05
+failures:                           # all optional
+  message_drop: 0.05                # P(drop) per send
+  byzantine_agents: 0.10            # fraction of agents that misbehave
+  network_partition:
+    groups:
+      - ["agent-0", "agent-1"]
+      - ["agent-2", "agent-3"]
 
-duration: ticks: 10000
+duration: "ticks: 10000"            # NOTE: string, not nested dict. Format: "ticks: N"
 
-metrics:
+metrics:                            # which metrics to compute by default
   - success_rate
   - mean_latency
+  - message_count
 
 output:
-  trace: ./traces/output.jsonl
+  trace: ./traces/my_scenario.jsonl # where to write the JSONL trace
 ```
 
-## Task types
+> **Watch the `duration` field.** It looks like it should be a nested
+> dict (`duration:\n  ticks: 10000`) but the scenario loader parses it
+> as a *string*. Use `duration: "ticks: 10000"` exactly.
 
-- `marketplace` — Buyers and sellers exchange goods
-- More to come in future phases
+## Built-in task types
 
-## Failure types
+`task.type` selects an agent factory bundled with `nest-core`:
 
-- `message_drop` — Probability of dropping a message
-- `byzantine_agents` — Fraction of agents that misbehave
-- `network_partition` — Split the network at a specific tick
+| `task.type` | What agents do |
+|---|---|
+| `marketplace` | Buyers send buy requests; sellers price-quote and respond. |
+| `auction` | One auctioneer announces; bidders submit bids over multiple rounds. |
+| `voting` | A proposer broadcasts; voters reply; a coordinator tallies. |
+| `consensus` | A leader proposes a value; followers accept/reject; quorum decides. |
+| `supply_chain` | 4-hop chain (supplier → manufacturer → distributor → retailer). |
+| `reputation` | Honest + malicious agents; an observer reports cheaters. |
+| `shell_marketplace` | Marketplace, but agent decisions come from an LLM (tier 2). |
+
+To build a *new* task type you need to register a factory inside
+`nest-core` — see the "Adding a new scenario" section of
+[CONTRIBUTING.md](../CONTRIBUTING.md). Custom task types from external
+packages aren't supported yet.
+
+## Failure injection
+
+All three knobs in the `failures:` block are evaluated by the simulator
+against the failure-injection RNG (separate from per-agent RNGs, so
+agents stay deterministic when you toggle failures on/off):
+
+- **`message_drop`** — A float in `[0, 1]`. Each outbound message is
+  dropped with this probability.
+- **`byzantine_agents`** — A float in `[0, 1]`. That fraction of agents
+  is flipped into a Byzantine mode where they send garbled payloads.
+- **`network_partition.groups`** — A list of lists of agent IDs. Agents
+  can only deliver messages to other agents in the same group.
+
+## Tier 2 (LLM-backed) scenarios
+
+```yaml
+tier: 2
+agents:
+  count: 6
+  brain: shell
+  llm_provider: anthropic     # anthropic | openai | mock
+  roles:
+    - name: buyer
+      count: 3
+    - name: seller
+      count: 3
+```
+
+Requires `pip install "nest-core[llm]"` and an
+`OPENAI_API_KEY` or `ANTHROPIC_API_KEY` env var. Tier 2 is
+non-deterministic — same seed will *not* give the same trace. Use it
+for exploring emergent behavior, not for benchmarks.
+
+## Worked example: stress-test a new payments scheme
+
+```bash
+# Start from the marketplace baseline
+nest scenarios cp marketplace ./bench.yaml
+
+# Edit bench.yaml:
+#   layers.payments: flat_fee
+#   failures.message_drop: 0.05
+#   agents.count: 200
+#   agents.roles: [{name: buyer, count: 100}, {name: seller, count: 100}]
+
+nest run ./bench.yaml -o ./traces/bench.jsonl
+nest report ./traces/bench.jsonl -o bench-report.html
+
+python -c "
+from pathlib import Path
+from nest_core.validators import validate_trace
+for r in validate_trace(Path('traces/bench.jsonl'), 'marketplace'):
+    print(('PASS' if r.passed else 'FAIL'), r.name, '-', r.detail)
+"
+```
+
+Same seed → repeatable. Tweak one knob at a time and diff the reports.

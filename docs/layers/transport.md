@@ -1,15 +1,44 @@
 # Transport layer
 
+**What it does.** Move opaque byte payloads between agents.
+
 ## Interface
 
-See `nest_core.layers.transport` for the full Protocol definition.
+```python
+class Transport(Protocol):
+    async def send(self, to: AgentId, payload: bytes) -> None: ...
+    async def receive(self) -> tuple[AgentId, bytes]: ...
+    async def broadcast(self, payload: bytes) -> None: ...
+```
+
+Full definition: [`nest_core/layers/transport.py`](../../packages/nest-core/nest_core/layers/transport.py).
+Import from `nest_sdk` in plugin code.
 
 ## Default plugin
 
-See `nest-plugins-reference` for the reference implementation.
+`in_memory` — an in-process event queue. Zero latency: `mean_latency`
+and `duration` come out as `0.0` unless agents use `ctx.schedule(delay)`
+or you write a transport that introduces per-hop delay.
 
-## Writing a new transport plugin
+Source: [`nest_plugins_reference/transport/in_memory.py`](../../packages/nest-plugins-reference/nest_plugins_reference/transport/in_memory.py).
 
-1. Implement the Protocol from `nest_sdk`.
-2. Register via entry point in your `pyproject.toml`.
-3. Run conformance tests: `nest plugins conform <your-package>`.
+## Writing your own
+
+See [`writing-a-plugin.md`](../writing-a-plugin.md) for the full walkthrough.
+Register under entry point group `nest.plugins.transport`.
+
+A plugin may declare static capabilities:
+
+```python
+from nest_sdk import TransportCapabilities
+
+class MyTransport:
+    capabilities = TransportCapabilities(
+        supports_streaming=False,
+        ordered=True,
+        reliable=True,
+    )
+    async def send(self, to, payload): ...
+    async def receive(self): ...
+    async def broadcast(self, payload): ...
+```

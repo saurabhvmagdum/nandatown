@@ -1,36 +1,124 @@
 # Concepts
 
-## What is NEST?
+NEST is a **testing rig for agent protocols**. You bring a protocol —
+payments, identity, coordination, trust, anything a swarm of agents has
+to agree on — and NEST gives you the rest of the stack, a scenario to
+exercise it, and a trace you can validate.
 
-NEST (Network Environment for Swarm Testing) is an open-source sandbox for testing agent protocols at scale. It is part of NANDA, the Internet of AI Agents.
+This document explains the pieces that make that work.
 
 ## The 12 layers
 
-NEST decomposes the agent stack into 12 pluggable layers. Each layer has a stable Python interface. Plugins implement these interfaces.
+NEST decomposes the agent stack into 12 Python `Protocol`s (structural
+typing — no inheritance required). Every scenario picks one
+implementation per layer.
 
-1. **Transport** — How bytes move between agents
-2. **Communication** — Message format and request/response semantics
-3. **Identity** — Agent identity and verification
-4. **Registry** — How agents find each other
-5. **Auth** — Authentication and authorization
-6. **Trust** — Reputation and attestation
-7. **Payments** — How value moves
-8. **Coordination** — How groups decide
-9. **Negotiation** — Bargaining between agents
-10. **Memory** — Shared state
-11. **Privacy** — Encryption and zero-knowledge proofs
-12. **Data Facts** — Dataset metadata and exchange
+| # | Layer | What it does | Reference default |
+|---|---|---|---|
+|  1 | **Transport** | Move bytes between agents. | `in_memory` (zero-latency event queue) |
+|  2 | **Communication** | Frame messages, request/response semantics. | `nest_native` (JSON envelope, base64 payload) |
+|  3 | **Identity** | Sign / verify per-agent payloads. | `did_key` (HMAC-SHA256, *not* Ed25519) |
+|  4 | **Registry** | Publish and discover agent cards. | `in_memory` (dict, no persistence) |
+|  5 | **Auth** | Issue, verify, revoke capability tokens. | `jwt` (HMAC-signed, *not* RFC JWT) |
+|  6 | **Trust** | Reputation scores, attestations, reports. | `score_average` (running mean) |
+|  7 | **Payments** | Quote, pay, verify, refund. | `prepaid_credits` (in-memory ledger) |
+|  8 | **Coordination** | Group decisions, task allocation. | `contract_net` (FIPA: propose / bid / commit) |
+|  9 | **Negotiation** | Bilateral bargaining. | `alternating_offers` (Rubinstein) |
+| 10 | **Memory** | Shared K/V with subscribe + CAS. | `blackboard` |
+| 11 | **Privacy** | Encrypt, decrypt, zero-knowledge proofs. | `noop` (stub passthrough) |
+| 12 | **Data Facts** | Dataset publish / fetch / ACL. | `datafacts_v1` |
 
-## Three fidelity tiers
+All reference defaults are deliberately simplified — testing scaffolding,
+not production code. The point is to replace the one layer you care
+about and leave the rest as a host.
 
-- **Tier 1** — Pure simulation with state-machine agents and virtual clock. Scales to 10k+ agents. Deterministic.
-- **Tier 2** — Shell agent backed by a real LLM (via litellm). 10–100 agents.
-- **Tier 3** — Bring your own Docker container. (Post-MVP)
+Each layer has its own page under [`layers/`](layers/) with the method
+signatures and a pointer to its reference plugin.
 
 ## Scenarios
 
-A scenario is a YAML file that defines an experiment: how many agents, which plugins for each layer, what task to run, and what failures to inject.
+A scenario is a YAML file that pins together:
+
+- **agents**: how many, what roles, what brain (state-machine or LLM)
+- **layers**: which plugin to use for each of the 12 layers
+- **task**: what the agents are *trying* to do (`marketplace`, `auction`, …)
+- **failures**: drop rate, Byzantine fraction, partitions
+- **duration / seed / output**: how long to run, what to seed, where to write the trace
+
+See [`writing-a-scenario.md`](writing-a-scenario.md) for the full
+schema. The seven scenarios bundled with `nest-core` are:
+
+| Name | Stresses |
+|---|---|
+| `marketplace` | payments · trust · registry · negotiation under bilateral price discovery |
+| `auction` | coordination + multi-round messaging |
+| `voting` | tally correctness, no double-voting |
+| `consensus` | quorum agreement (default 2/3, not full BFT) |
+| `supply_chain` | multi-hop reliability under drop / partition |
+| `reputation` | trust under probabilistically-cheating agents |
+| `shell_marketplace` | same as marketplace, but agents are LLM-driven (Tier 2) |
 
 ## Plugins
 
-A plugin is a Python package that implements one layer interface. Plugins register via entry points and can declare requirements on other layers.
+A plugin is a Python package that implements one of the 12 layer
+interfaces. NEST discovers plugins via `importlib.metadata` entry points
+under the group `nest.plugins.<layer>`:
+
+```toml
+[project.entry-points."nest.plugins.payments"]
+my_scheme = "my_pkg.module:MyClass"
+```
+
+When a scenario says `payments: my_scheme`, the
+[`PluginRegistry`](../packages/nest-core/nest_core/plugins.py) looks up
+that entry point (or a built-in fallback) and instantiates it. Because
+layer interfaces are `typing.Protocol`, your class doesn't need to
+inherit from anything — it just needs to match the method signatures.
+
+See [`writing-a-plugin.md`](writing-a-plugin.md) for the full walkthrough.
+
+## Fidelity tiers
+
+| Tier | Agent | Scale | Deterministic | Use case |
+|---|---|---|---|---|
+| **1** | `StateMachineAgent` | 10,000+ | Yes | Protocol correctness, parameter sweeps, regression. |
+| **2** *(experimental)* | `ShellAgent` (OpenAI / Anthropic / mock) | 10–100 | No | Emergent behavior of LM agents. Not for benchmarks. |
+
+Tier 2 requires `pip install "nest-core[llm]"` and an
+`OPENAI_API_KEY` or `ANTHROPIC_API_KEY` env var. Activate it in YAML
+with `agents.brain: shell` and `agents.llm_provider: openai|anthropic|mock`.
+
+There is no Tier 3.
+
+## Determinism — what the clock does
+
+Two things to know that surprise newcomers:
+
+1. **Same seed → identical trace.** The master RNG is seeded once,
+   derives a per-agent RNG and a separate failure-injection RNG, then
+   replays exactly under the same seed. Use this for regression
+   benchmarks.
+2. **The default `in_memory` transport is zero-latency.** Messages are
+   delivered at `time = now`, so `mean_latency` and `duration` in your
+   report will both be `0.0`. The event queue still orders events
+   deterministically, so correctness checks are fine — but if you need
+   *latency numbers*, agents must call `ctx.schedule(delay, ...)` or
+   you must write a transport plugin that introduces per-hop delay.
+
+## Traces
+
+Every run writes a JSONL trace — one event per line, in order. Events
+are flat dicts with at least `t` (logical tick), `kind` (`start`,
+`send`, `receive`, `stop`), `agent`, and a payload. `nest inspect`,
+`nest report`, `nest dashboard`, and `nest_core.validators.validate_trace`
+all read the same JSONL.
+
+You can grep, `jq`, diff, or check it into git — it's just text.
+
+## Validators
+
+`nest_core.validators` ships property checks for each scenario. They're
+intentional **property checks**, not blanket "did the scenario run?"
+assertions. Read the table in [the README](../README.md#validators) for
+what each one verifies, and the warning about `marketplace_no_double_sell`
+failing against the reference trace by design.

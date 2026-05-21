@@ -1,46 +1,99 @@
-# Quick start
+# Quickstart
 
-## Installation
+Get from zero to a validated trace in about a minute.
+
+## 1. Install
 
 ```bash
 pip install "nest-core[plugins]"
 ```
 
-## Your first run
+This installs the CLI, the reference plugins for all 12 layers, and the
+seven built-in scenarios. No `git clone` required.
+
+Optional extras:
 
 ```bash
-# Run the marketplace scenario with all defaults
-nest run scenarios/marketplace.yaml
-
-# Inspect the trace
-nest inspect traces/marketplace.jsonl
+pip install "nest-core[llm]"        # Tier 2 LLM agents (nest-shell)
+pip install "nest-core[full]"       # plugins + llm
 ```
 
-## Check your setup
+## 2. Verify
 
 ```bash
 nest doctor
 ```
 
-## Writing a scenario
+You should see `7/7 checks passed`. If you don't, the output names the
+exact check that failed.
 
-```yaml
-name: my-experiment
-tier: 1
-agents:
-  count: 10
-  brain: state-machine
-layers:
-  transport: in_memory
-  comms: nest_native
-  # ... all 12 layers
-task:
-  type: marketplace
-  config:
-    rounds: 10
-duration: ticks: 1000
+## 3. Run a built-in scenario
+
+```bash
+nest run marketplace
 ```
 
-## Writing a plugin
+Output:
 
-See [writing-a-plugin.md](writing-a-plugin.md).
+```
+Running scenario: marketplace
+  agents: 100  seed: 42  ticks: 10000
+Trace written to: traces/marketplace.jsonl
+```
+
+Same seed → byte-identical trace, every time.
+
+> **Don't run `nest run scenarios/marketplace.yaml`.** That only works
+> inside a clone of the repo, because pip doesn't install the
+> `scenarios/` directory. Use the built-in name `marketplace`, or copy a
+> scenario out to edit (see step 5).
+
+## 4. Look at the result
+
+```bash
+# Quick text summary
+nest inspect ./traces/marketplace.jsonl
+
+# HTML metrics report
+nest report ./traces/marketplace.jsonl -o report.html
+
+# Interactive dashboard (opens a browser)
+nest dashboard ./traces/marketplace.jsonl
+```
+
+Property-level validation (this is where NEST proves your protocol does
+what you claim):
+
+```bash
+python -c "
+from pathlib import Path
+from nest_core.validators import validate_trace
+for r in validate_trace(Path('traces/marketplace.jsonl'), 'marketplace'):
+    print(('PASS' if r.passed else 'FAIL'), r.name, '-', r.detail)
+"
+```
+
+> **Heads-up.** Validators check protocol invariants, not the bundled
+> scenarios themselves. `marketplace_no_double_sell` will report `FAIL`
+> against the reference trace by design — the default seller has no
+> inventory model. The validator is for *your* inventory-aware
+> implementation. See [README §Validators](../README.md#validators).
+
+## 5. Edit a scenario
+
+```bash
+nest scenarios list                       # see what's bundled
+nest scenarios show marketplace           # print YAML to stdout
+nest scenarios cp marketplace ./my.yaml   # copy to disk for editing
+nest run ./my.yaml                        # run the local copy
+```
+
+Try changing `failures.message_drop` from `0.0` to `0.05` and re-running
+to see how a 5% drop rate affects `delivery_rate` and `deal_rate` in the
+report.
+
+## What's next
+
+- **Plug in your own layer:** [writing-a-plugin.md](writing-a-plugin.md)
+- **Build a new scenario:** [writing-a-scenario.md](writing-a-scenario.md)
+- **How the layers fit together:** [concepts.md](concepts.md)

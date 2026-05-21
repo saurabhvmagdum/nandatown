@@ -1,15 +1,30 @@
 # Auth layer
 
+**What it does.** Issue, verify, and revoke capability tokens (scopes
+granted to a subject).
+
 ## Interface
 
-See `nest_core.layers.auth` for the full Protocol definition.
+```python
+class Auth(Protocol):
+    async def issue(self, subject: AgentId, scopes: list[str]) -> Token: ...
+    async def verify(self, token: Token) -> AuthContext: ...
+    async def revoke(self, token: Token) -> None: ...
+```
+
+Full definition: [`nest_core/layers/auth.py`](../../packages/nest-core/nest_core/layers/auth.py).
 
 ## Default plugin
 
-See `nest-plugins-reference` for the reference implementation.
+`jwt` — HMAC-SHA256-signed token. **Not an RFC 7519 JWT.** Convenient
+shape (header.payload.sig), no claim validation beyond the signature.
 
-## Writing a new auth plugin
+Source: [`nest_plugins_reference/auth/jwt_auth.py`](../../packages/nest-plugins-reference/nest_plugins_reference/auth/jwt_auth.py).
 
-1. Implement the Protocol from `nest_sdk`.
-2. Register via entry point in your `pyproject.toml`.
-3. Run conformance tests: `nest plugins conform <your-package>`.
+## Writing your own
+
+See [`writing-a-plugin.md`](../writing-a-plugin.md). Register under
+entry point group `nest.plugins.auth`.
+
+Good fits to test here: real JWT/PASETO/biscuit/macaroons, OAuth-style
+flows, capability delegation, revocation propagation.

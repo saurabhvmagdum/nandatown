@@ -1,15 +1,31 @@
 # Identity layer
 
+**What it does.** Sign payloads, verify signatures, resolve an `AgentId`
+to a public identity record.
+
 ## Interface
 
-See `nest_core.layers.identity` for the full Protocol definition.
+```python
+class Identity(Protocol):
+    def sign(self, payload: bytes) -> Signature: ...
+    def verify(self, payload: bytes, sig: Signature, agent: AgentId) -> bool: ...
+    async def resolve(self, agent: AgentId) -> AgentIdentity: ...
+```
+
+Full definition: [`nest_core/layers/identity.py`](../../packages/nest-core/nest_core/layers/identity.py).
 
 ## Default plugin
 
-See `nest-plugins-reference` for the reference implementation.
+`did_key` — DID:key-shaped identity for tests. **Signs with
+HMAC-SHA256, not Ed25519.** Don't use it for anything that needs real
+cryptographic identity.
 
-## Writing a new identity plugin
+Source: [`nest_plugins_reference/identity/did_key.py`](../../packages/nest-plugins-reference/nest_plugins_reference/identity/did_key.py).
 
-1. Implement the Protocol from `nest_sdk`.
-2. Register via entry point in your `pyproject.toml`.
-3. Run conformance tests: `nest plugins conform <your-package>`.
+## Writing your own
+
+See [`writing-a-plugin.md`](../writing-a-plugin.md). Register under
+entry point group `nest.plugins.identity`.
+
+Good fits to test here: real Ed25519/secp256k1 signing, DID method
+implementations, key rotation, multi-key agents.
