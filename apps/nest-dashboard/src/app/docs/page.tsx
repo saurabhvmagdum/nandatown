@@ -151,7 +151,7 @@ function Sidebar({
         className={`
           fixed top-16 left-0 z-50 h-[calc(100vh-4rem)] w-72 transform border-r border-cream-400/70
           bg-cream-100/95 backdrop-blur-md transition-transform duration-300 ease-in-out
-          lg:sticky lg:z-10 lg:translate-x-0 lg:bg-transparent lg:border-r lg:border-cream-400/70
+          lg:z-10 lg:translate-x-0 lg:bg-transparent
           ${open ? 'translate-x-0' : '-translate-x-full'}
         `}
       >
