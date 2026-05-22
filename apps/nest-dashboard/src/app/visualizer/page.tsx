@@ -378,6 +378,21 @@ function parseTrace(text: string): TraceEvent[] {
     }
   }
   out.sort((a, b) => a.ts - b.ts);
+
+  // NEST trace files currently emit ts:0.0 for every event. If the trace
+  // has no temporal spread, synthesize one from file order so playback
+  // has something to animate against.
+  if (out.length > 1) {
+    const minTs = out[0].ts;
+    const maxTs = out[out.length - 1].ts;
+    if (maxTs - minTs < 1e-6) {
+      const span = 10;
+      const n = out.length;
+      for (let i = 0; i < n; i++) {
+        out[i] = { ...out[i], ts: (i / Math.max(1, n - 1)) * span };
+      }
+    }
+  }
   return out;
 }
 
@@ -521,6 +536,17 @@ function derive(events: TraceEvent[]): Derived {
 
   const agentList = Array.from(agents.values());
   const agentIndex = new Map(agentList.map((a, i) => [a.id, i]));
+
+  // Ensure each flight has a visible lifetime — synthetic traces often have
+  // sub-microsecond gaps between send/receive that flash by in <1 wall frame.
+  const totalSpan = isFinite(tMax - tMin) ? Math.max(tMax - tMin, 0.01) : 1;
+  const minLifetime = totalSpan / 36; // ≈ 0.5 wall sec at the default 18s playback
+  for (const f of flights) {
+    if (f.tEnd - f.tStart < minLifetime) {
+      f.tEnd = f.tStart + minLifetime;
+      if (f.tEnd > tMax) tMax = f.tEnd;
+    }
+  }
 
   // Build edge counts directly without round-tripping through a single string key
   const edgeMap = new Map<string, { source: string; target: string; count: number }>();
@@ -731,6 +757,17 @@ function Player({
     const n = derived.agents.length;
     const collideR = n > 60 ? 11 : n > 30 ? 15 : 22;
 
+    // Pre-populate positions from the seed so the first render already shows
+    // nodes — d3 sim ticks happen asynchronously and React may not pick up
+    // ref mutations until the next state-triggered render.
+    {
+      const m = positionsRef.current;
+      m.clear();
+      for (const node of nodes) {
+        m.set(node.id, { x: node.x ?? 0, y: node.y ?? 0 });
+      }
+    }
+
     const sim = d3
       .forceSimulation<ForceNode, ForceLink>(nodes)
       .force(
@@ -775,6 +812,7 @@ function Player({
 
     simRef.current = sim;
     nodesRef.current = nodes;
+    bump((t) => (t + 1) % 1_000_000);
 
     return () => {
       sim.stop();
