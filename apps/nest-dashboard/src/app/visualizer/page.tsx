@@ -13,16 +13,6 @@ import * as d3 from 'd3';
 /* ------------------------------------------------------------------ */
 /*  Real NEST trace format                                            */
 /* ------------------------------------------------------------------ */
-/*  Lines from nest/traces/*.jsonl look like:                          */
-/*    {"ts":0.0,"agent":"a","kind":"start"}                            */
-/*    {"ts":1.0,"agent":"a","kind":"send","to":"b",                   */
-/*     "size":12,"msg":"hello","corr":"corr-1"}                       */
-/*    {"ts":2.0,"agent":"b","kind":"receive","from":"a",              */
-/*     "size":12,"msg":"hello","corr":"corr-1"}                       */
-/*    {"ts":2.0,"agent":"b","kind":"dropped","from":"a",...}          */
-/*    {"ts":3.0,"agent":"a","kind":"broadcast","msg":"...",           */
-/*     "corr":"corr-2"}                                                */
-/*    {"ts":10.0,"agent":"a","kind":"stop"}                            */
 
 type TraceKind =
   | 'start'
@@ -137,10 +127,21 @@ function roleColor(role: string): string {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Role icons — line-art, no background, drawn in the nest aesthetic */
+/*  Role icons — PNG illustrations where available, line-art fallback */
 /* ------------------------------------------------------------------ */
-/*  Each path is laid out in a 24×24 viewBox, centered around (12,12),*/
-/*  stroke-only so it sits flush against the cream backdrop.          */
+
+const ROLE_ICON_SRC: Record<string, string> = {
+  auctioneer:   '/brand/nodes/node_auctioneer_v2.png',
+  buyer:        '/brand/nodes/node_buyer_v2.png',
+  coordinator:  '/brand/nodes/node_coordinator_v2.png',
+  distributor:  '/brand/nodes/node_distributor_v2.png',
+  manufacturer: '/brand/nodes/node_manufacturer_v2.png',
+  proposer:     '/brand/nodes/node_proposer_v2.png',
+  retailer:     '/brand/nodes/node_retailer_v2.png',
+  seller:       '/brand/nodes/node_seller_v2.png',
+  supplier:     '/brand/nodes/node_supplier_v2.png',
+  voter:        '/brand/nodes/node_voter_v2.png',
+};
 
 interface RoleIconProps {
   role: string;
@@ -159,9 +160,27 @@ function RoleIcon({
   color,
   strokeWidth = 1.4,
 }: RoleIconProps) {
+  const src = ROLE_ICON_SRC[role];
+  if (src) {
+    // PNG illustrations rendered at 1.35x the line-art size so the
+    // detailed artwork reads at similar visual weight to the SVG icons.
+    const renderSize = size * 1.35;
+    const half = renderSize / 2;
+    return (
+      <image
+        href={src}
+        x={cx - half}
+        y={cy - half}
+        width={renderSize}
+        height={renderSize}
+        preserveAspectRatio="xMidYMid meet"
+        style={{ pointerEvents: 'none' }}
+      />
+    );
+  }
+
   const half = size / 2;
   const s = size / 24;
-  // We translate so the (0,0) corner of a 24×24 box sits at (cx-half, cy-half).
   const tx = cx - half;
   const ty = cy - half;
   const common = {
@@ -176,7 +195,6 @@ function RoleIcon({
       {(() => {
         switch (role) {
           case 'auctioneer':
-            // gavel: diamond head + handle + base
             return (
               <>
                 <path d="M5 13 L11 7 L17 13 L11 19 Z" {...common} />
@@ -185,7 +203,6 @@ function RoleIcon({
               </>
             );
           case 'bidder':
-            // raised paddle
             return (
               <>
                 <path d="M7 4 H17 V13 H7 Z" {...common} />
@@ -193,7 +210,6 @@ function RoleIcon({
               </>
             );
           case 'leader':
-            // crown
             return (
               <>
                 <path
@@ -204,7 +220,6 @@ function RoleIcon({
               </>
             );
           case 'follower':
-            // small person — head + body V
             return (
               <>
                 <circle cx={12} cy={7} r={2.8} {...common} />
@@ -212,7 +227,6 @@ function RoleIcon({
               </>
             );
           case 'buyer':
-            // shopping bag
             return (
               <>
                 <path d="M5 8 L7 22 H17 L19 8 Z" {...common} />
@@ -220,7 +234,6 @@ function RoleIcon({
               </>
             );
           case 'seller':
-            // coin stack
             return (
               <>
                 <ellipse cx={12} cy={7} rx={7} ry={2.4} {...common} />
@@ -233,7 +246,6 @@ function RoleIcon({
               </>
             );
           case 'proposer':
-            // speech bubble with tail
             return (
               <>
                 <path d="M4 4 H20 V15 H11 L5 21 V15 H4 Z" {...common} />
@@ -242,7 +254,6 @@ function RoleIcon({
               </>
             );
           case 'coordinator':
-            // hub with radiating ties (like a coordinator node)
             return (
               <>
                 <circle cx={12} cy={12} r={3.2} {...common} />
@@ -257,7 +268,6 @@ function RoleIcon({
               </>
             );
           case 'voter':
-            // ballot with check
             return (
               <>
                 <path d="M4 4 H20 V20 H4 Z" {...common} />
@@ -265,7 +275,6 @@ function RoleIcon({
               </>
             );
           case 'honest':
-            // shield with check
             return (
               <>
                 <path
@@ -276,7 +285,6 @@ function RoleIcon({
               </>
             );
           case 'malicious':
-            // jagged lightning
             return (
               <path
                 d="M13 2 L5 13 L11 13 L8 22 L19 10 L13 10 L16 2 Z"
@@ -284,7 +292,6 @@ function RoleIcon({
               />
             );
           case 'observer':
-            // eye
             return (
               <>
                 <path d="M2 12 Q12 4 22 12 Q12 20 2 12 Z" {...common} />
@@ -293,7 +300,6 @@ function RoleIcon({
               </>
             );
           case 'supplier':
-            // crate
             return (
               <>
                 <path d="M4 6 H20 V20 H4 Z" {...common} />
@@ -302,7 +308,6 @@ function RoleIcon({
               </>
             );
           case 'manufacturer':
-            // gear
             return (
               <>
                 <circle cx={12} cy={12} r={5} {...common} />
@@ -324,7 +329,6 @@ function RoleIcon({
               </>
             );
           case 'distributor':
-            // small truck
             return (
               <>
                 <path d="M2 9 H13 V17 H2 Z" {...common} />
@@ -334,7 +338,6 @@ function RoleIcon({
               </>
             );
           case 'retailer':
-            // storefront / house
             return (
               <>
                 <path d="M3 12 L12 4 L21 12 V21 H3 Z" {...common} />
@@ -342,7 +345,6 @@ function RoleIcon({
               </>
             );
           default:
-            // generic: small nest mark — three crossed twigs in a ring
             return (
               <>
                 <ellipse cx={12} cy={13} rx={8.5} ry={5} {...common} />
@@ -416,13 +418,18 @@ interface Derived {
   totalBroadcasts: number;
 }
 
+const SEP = '__';
+
+function edgeKey(source: string, target: string) {
+  return `${source}${SEP}${target}`;
+}
+
 function derive(events: TraceEvent[]): Derived {
   const agents = new Map<string, Agent>();
   const ensureAgent = (id: string) => {
     if (!agents.has(id)) agents.set(id, { id, role: roleOf(id) });
   };
 
-  // pending sends keyed by corr -> {from, to, ts, msg}
   type Pending = { from: string; to?: string; ts: number; msg: string; kind: 'send' | 'broadcast' };
   const pending = new Map<string, Pending>();
   const flights: Flight[] = [];
@@ -471,9 +478,7 @@ function derive(events: TraceEvent[]): Derived {
           msg: p.msg,
         });
         if (p.kind === 'send') pending.delete(e.corr);
-        // broadcasts may fan out to many receivers, so keep pending entry
       } else {
-        // Receive without recorded send (e.g. trace cut short). Use a small synthetic flight.
         flights.push({
           source: e.from,
           target: e.agent,
@@ -501,7 +506,6 @@ function derive(events: TraceEvent[]): Derived {
     }
   }
 
-  // Any pending sends that never delivered: treat as dropped at tMax.
   for (const [, p] of pending) {
     if (p.kind === 'send' && p.to) {
       flights.push({
@@ -518,17 +522,15 @@ function derive(events: TraceEvent[]): Derived {
   const agentList = Array.from(agents.values());
   const agentIndex = new Map(agentList.map((a, i) => [a.id, i]));
 
-  // Aggregate edge counts (directed)
-  const edgeMap = new Map<string, number>();
+  // Build edge counts directly without round-tripping through a single string key
+  const edgeMap = new Map<string, { source: string; target: string; count: number }>();
   for (const f of flights) {
-    const key = `${f.source} ${f.target}`;
-    edgeMap.set(key, (edgeMap.get(key) ?? 0) + 1);
+    const key = edgeKey(f.source, f.target);
+    const cur = edgeMap.get(key);
+    if (cur) cur.count++;
+    else edgeMap.set(key, { source: f.source, target: f.target, count: 1 });
   }
-  const edges: EdgeKey[] = [];
-  for (const [key, count] of edgeMap) {
-    const [source, target] = key.split(' ');
-    edges.push({ source, target, count });
-  }
+  const edges: EdgeKey[] = Array.from(edgeMap.values());
 
   return {
     agents: agentList,
@@ -545,7 +547,7 @@ function derive(events: TraceEvent[]): Derived {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Layout: role-aware, deterministic                                 */
+/*  Initial role-aware layout (used to seed the force sim)            */
 /* ------------------------------------------------------------------ */
 
 interface Pos {
@@ -558,7 +560,6 @@ function computeLayout(agents: Agent[], width: number, height: number): Map<stri
   const cx = width / 2;
   const cy = height / 2;
 
-  // Group by role, preserve numeric order within role
   const byRole = new Map<string, Agent[]>();
   for (const a of agents) {
     if (!byRole.has(a.role)) byRole.set(a.role, []);
@@ -576,7 +577,6 @@ function computeLayout(agents: Agent[], width: number, height: number): Map<stri
   const roleCounts = roles.map((r) => byRole.get(r)!.length);
   const minDim = Math.min(width, height);
 
-  // Heuristic 1: pure chain (each role count is 1, ≤6 roles)
   if (roles.length >= 2 && roles.length <= 6 && roleCounts.every((c) => c === 1)) {
     const padding = minDim * 0.18;
     const usable = width - padding * 2;
@@ -588,7 +588,6 @@ function computeLayout(agents: Agent[], width: number, height: number): Map<stri
     return positions;
   }
 
-  // Heuristic 2: hub-and-spoke — one role of size 1, one large role
   const singletonRoles = roles.filter((r) => byRole.get(r)!.length === 1);
   const largeRoles = roles.filter((r) => byRole.get(r)!.length >= 4);
   if (
@@ -596,7 +595,6 @@ function computeLayout(agents: Agent[], width: number, height: number): Map<stri
     largeRoles.length === 1 &&
     singletonRoles.length + largeRoles.length === roles.length
   ) {
-    // Singleton(s) in center (stacked vertically if >1), large role in outer ring
     const ring = byRole.get(largeRoles[0])!;
     const ringRadius = minDim * 0.4;
     ring.forEach((a, i) => {
@@ -614,7 +612,6 @@ function computeLayout(agents: Agent[], width: number, height: number): Map<stri
     return positions;
   }
 
-  // Heuristic 3: two large roles facing each other (marketplace: 50 buyers vs 50 sellers)
   if (roles.length === 2 && roleCounts.every((c) => c >= 4)) {
     const [rA, rB] = roles;
     const listA = byRole.get(rA)!;
@@ -640,8 +637,6 @@ function computeLayout(agents: Agent[], width: number, height: number): Map<stri
     return positions;
   }
 
-  // Default: cluster by role on outer circle, with each role packed into its own
-  // small disc.
   const ringRadius = minDim * 0.34;
   const clusterRadius = (minDim * 0.32) / Math.max(2, roles.length);
   roles.forEach((r, ri) => {
@@ -662,7 +657,7 @@ function computeLayout(agents: Agent[], width: number, height: number): Map<stri
 }
 
 /* ------------------------------------------------------------------ */
-/*  Player                                                             */
+/*  Player — force-directed, draggable, zoomable                      */
 /* ------------------------------------------------------------------ */
 
 interface ForceNode extends d3.SimulationNodeDatum {
@@ -678,44 +673,49 @@ interface ForceLink extends d3.SimulationLinkDatum<ForceNode> {
 
 interface PlayerProps {
   derived: Derived;
+  simTime: number;
+  setSimTime: (t: number | ((t: number) => number)) => void;
+  playing: boolean;
+  setPlaying: (p: boolean | ((p: boolean) => boolean)) => void;
+  speed: number;
+  setSpeed: (s: number) => void;
 }
 
-function Player({ derived }: PlayerProps) {
-  const [simTime, setSimTime] = useState(derived.tMin);
-  const [playing, setPlaying] = useState(true);
-  const [speed, setSpeed] = useState(1);
-
-  // Stage viewport (logical SVG coords). The container scales it to fit.
+function Player({
+  derived,
+  simTime,
+  setSimTime,
+  playing,
+  setPlaying,
+  speed,
+  setSpeed,
+}: PlayerProps) {
   const W = 900;
   const H = 580;
 
   const [hover, setHover] = useState<string | null>(null);
   const [focused, setFocused] = useState<string | null>(null);
   const [view, setView] = useState({ k: 1, x: 0, y: 0 });
-  const [, bump] = useState(0); // forces re-render on force-sim tick
+  const [, bump] = useState(0);
 
   const svgRef = useRef<SVGSVGElement>(null);
   const nodesRef = useRef<ForceNode[]>([]);
   const positionsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
   const simRef = useRef<d3.Simulation<ForceNode, ForceLink> | null>(null);
+  const viewRef = useRef(view);
+  viewRef.current = view;
 
-  // ---- Initialize force sim whenever the trace changes ------------------
+  // Initialize force simulation each time the trace changes
   useEffect(() => {
     const seed = computeLayout(derived.agents, W, H);
     const nodes: ForceNode[] = derived.agents.map((a) => {
       const p = seed.get(a.id) ?? { x: W / 2, y: H / 2 };
       return { id: a.id, role: a.role, x: p.x, y: p.y, vx: 0, vy: 0 };
     });
+    const links: ForceLink[] = derived.edges
+      .filter((e) => e.source !== e.target && e.source && e.target)
+      .map((e) => ({ source: e.source, target: e.target, value: e.count }));
 
-    const edges = derived.edges.filter((e) => e.source !== e.target);
-    const links: ForceLink[] = edges.map((e) => ({
-      source: e.source,
-      target: e.target,
-      value: e.count,
-    }));
-
-    // Cluster centers by role on an outer ring — gives marketplace its
-    // two-side feel and consensus its leader-in-middle feel naturally.
     const roles = Array.from(new Set(derived.agents.map((a) => a.role)));
     const roleAngle = new Map<string, number>();
     roles.forEach((r, i) => {
@@ -729,13 +729,13 @@ function Player({ derived }: PlayerProps) {
     const clusterR = Math.min(W, H) * 0.30;
 
     const n = derived.agents.length;
-    const collideR = n > 60 ? 11 : n > 30 ? 15 : 21;
+    const collideR = n > 60 ? 11 : n > 30 ? 15 : 22;
 
     const sim = d3
       .forceSimulation<ForceNode, ForceLink>(nodes)
       .force(
         'charge',
-        d3.forceManyBody<ForceNode>().strength(-170).distanceMax(320),
+        d3.forceManyBody<ForceNode>().strength(-180).distanceMax(340),
       )
       .force(
         'link',
@@ -781,7 +781,7 @@ function Player({ derived }: PlayerProps) {
     };
   }, [derived]);
 
-  // ---- Animation loop (advances simTime via parent) --------------------
+  // Playback animation
   const targetDuration = 18;
   const simPerWallSec =
     Math.max(derived.tMax - derived.tMin, 0.01) / targetDuration;
@@ -810,22 +810,20 @@ function Player({ derived }: PlayerProps) {
     return () => cancelAnimationFrame(frame);
   }, [playing, speed, simPerWallSec, derived.tMax, setSimTime, setPlaying]);
 
-  // ---- Pointer → SVG coordinate, accounting for current zoom ------------
-  const clientToSvg = useCallback(
-    (clientX: number, clientY: number) => {
-      const svg = svgRef.current;
-      if (!svg) return { x: 0, y: 0 };
-      const rect = svg.getBoundingClientRect();
-      const sx = ((clientX - rect.left) / rect.width) * W;
-      const sy = ((clientY - rect.top) / rect.height) * H;
-      return { x: (sx - view.x) / view.k, y: (sy - view.y) / view.k };
-    },
-    [view],
-  );
+  // Convert client coords to SVG world coords (post-zoom)
+  const clientToSvg = useCallback((clientX: number, clientY: number) => {
+    const svg = svgRef.current;
+    if (!svg) return { x: 0, y: 0 };
+    const rect = svg.getBoundingClientRect();
+    const sx = ((clientX - rect.left) / rect.width) * W;
+    const sy = ((clientY - rect.top) / rect.height) * H;
+    const v = viewRef.current;
+    return { x: (sx - v.x) / v.k, y: (sy - v.y) / v.k };
+  }, []);
 
-  // ---- Drag a node (use pointer events; pins via fx/fy) -----------------
+  // Drag a node
   const startNodeDrag = useCallback(
-    (id: string, e: React.PointerEvent) => {
+    (id: string, e: React.PointerEvent<SVGGElement>) => {
       if (!simRef.current) return;
       e.preventDefault();
       e.stopPropagation();
@@ -840,15 +838,16 @@ function Player({ derived }: PlayerProps) {
       node.y = start.y;
 
       let moved = false;
+      const downX = e.clientX;
+      const downY = e.clientY;
       const onMove = (ev: PointerEvent) => {
-        moved = true;
+        if (Math.hypot(ev.clientX - downX, ev.clientY - downY) > 3) moved = true;
         const pt = clientToSvg(ev.clientX, ev.clientY);
         node.fx = pt.x;
         node.fy = pt.y;
       };
       const onUp = () => {
         simRef.current?.alphaTarget(0);
-        // Tiny click = release pin (toggle); real drag keeps it pinned.
         if (!moved) {
           node.fx = null;
           node.fy = null;
@@ -864,30 +863,27 @@ function Player({ derived }: PlayerProps) {
     [clientToSvg],
   );
 
-  // ---- Background pan ---------------------------------------------------
-  const startBgPan = useCallback(
-    (e: React.PointerEvent) => {
-      if ((e.target as SVGElement).closest('[data-agent]')) return;
-      const startClient = { x: e.clientX, y: e.clientY };
-      const startView = { x: view.x, y: view.y };
-      const svg = svgRef.current!;
-      const rect = svg.getBoundingClientRect();
-      const onMove = (ev: PointerEvent) => {
-        const dx = ((ev.clientX - startClient.x) / rect.width) * W;
-        const dy = ((ev.clientY - startClient.y) / rect.height) * H;
-        setView((v) => ({ ...v, x: startView.x + dx, y: startView.y + dy }));
-      };
-      const onUp = () => {
-        window.removeEventListener('pointermove', onMove);
-        window.removeEventListener('pointerup', onUp);
-      };
-      window.addEventListener('pointermove', onMove);
-      window.addEventListener('pointerup', onUp);
-    },
-    [view],
-  );
+  // Pan the background
+  const startBgPan = useCallback((e: React.PointerEvent<SVGSVGElement>) => {
+    if ((e.target as SVGElement).closest('[data-agent]')) return;
+    const startClient = { x: e.clientX, y: e.clientY };
+    const startView = { x: viewRef.current.x, y: viewRef.current.y };
+    const svg = svgRef.current!;
+    const rect = svg.getBoundingClientRect();
+    const onMove = (ev: PointerEvent) => {
+      const dx = ((ev.clientX - startClient.x) / rect.width) * W;
+      const dy = ((ev.clientY - startClient.y) / rect.height) * H;
+      setView((v) => ({ ...v, x: startView.x + dx, y: startView.y + dy }));
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }, []);
 
-  // ---- Wheel zoom centered on cursor ------------------------------------
+  // Mouse-wheel zoom around cursor
   useEffect(() => {
     const svg = svgRef.current;
     if (!svg) return;
@@ -909,6 +905,7 @@ function Player({ derived }: PlayerProps) {
 
   const resetView = () => setView({ k: 1, x: 0, y: 0 });
 
+  // ------------------------- Derived state -------------------------
   interface InFlight {
     source: string;
     target: string;
@@ -917,14 +914,13 @@ function Player({ derived }: PlayerProps) {
     msg: string;
   }
   const inFlight: InFlight[] = useMemo(() => {
-    const t = simTime;
     const out: InFlight[] = [];
     for (const f of derived.flights) {
-      if (t < f.tStart) continue;
+      if (simTime < f.tStart) continue;
       const tail = Math.max((f.tEnd - f.tStart) * 0.04, 0.3);
-      if (t > f.tEnd + tail) continue;
+      if (simTime > f.tEnd + tail) continue;
       const dur = Math.max(f.tEnd - f.tStart, 1e-6);
-      let p = (t - f.tStart) / dur;
+      let p = (simTime - f.tStart) / dur;
       if (p > 1) p = 1;
       out.push({
         source: f.source,
@@ -938,7 +934,30 @@ function Player({ derived }: PlayerProps) {
     return out;
   }, [simTime, derived.flights]);
 
-  // Active agents (any flight involving them currently in flight or recently)
+  interface Ripple {
+    id: string;
+    t0: number;
+    kind: 'send' | 'recv';
+  }
+  const ripples: Ripple[] = useMemo(() => {
+    const out: Ripple[] = [];
+    const lifetime = 1.4;
+    for (const f of derived.flights) {
+      if (simTime >= f.tStart && simTime - f.tStart < lifetime) {
+        out.push({ id: f.source, t0: f.tStart, kind: 'send' });
+      }
+      if (
+        f.kind !== 'dropped' &&
+        simTime >= f.tEnd &&
+        simTime - f.tEnd < lifetime
+      ) {
+        out.push({ id: f.target, t0: f.tEnd, kind: 'recv' });
+      }
+      if (out.length > 200) break;
+    }
+    return out;
+  }, [simTime, derived.flights]);
+
   const activeAgents = useMemo(() => {
     const s = new Set<string>();
     for (const f of inFlight) {
@@ -948,22 +967,24 @@ function Player({ derived }: PlayerProps) {
     return s;
   }, [inFlight]);
 
-  // Edge weights derived from messages roughly near current time (windowed)
-  const recentWindow = (derived.tMax - derived.tMin) * 0.05;
+  const trafficWindow = (derived.tMax - derived.tMin) * 0.06;
   const recentEdges = useMemo(() => {
     const m = new Map<string, number>();
     for (const f of derived.flights) {
-      if (f.tEnd < simTime - recentWindow) continue;
+      if (f.tEnd < simTime - trafficWindow) continue;
       if (f.tStart > simTime) continue;
-      const key = `${f.source} ${f.target}`;
+      const key = edgeKey(f.source, f.target);
       m.set(key, (m.get(key) ?? 0) + 1);
     }
     return m;
-  }, [simTime, derived.flights, recentWindow]);
+  }, [simTime, derived.flights, trafficWindow]);
 
   const maxRecent = Math.max(1, ...recentEdges.values());
+  const maxTotal = useMemo(
+    () => Math.max(1, ...derived.edges.map((e) => e.count)),
+    [derived.edges],
+  );
 
-  // Aggregate counters as of current sim time
   const counters = useMemo(() => {
     let sent = 0;
     let received = 0;
@@ -981,189 +1002,350 @@ function Player({ derived }: PlayerProps) {
     return { sent, received, dropped, inFlight: inFlight.length };
   }, [simTime, derived.flights, inFlight.length]);
 
-  const pct = ((simTime - derived.tMin) / Math.max(derived.tMax - derived.tMin, 1e-6)) * 100;
+  const pct =
+    ((simTime - derived.tMin) / Math.max(derived.tMax - derived.tMin, 1e-6)) *
+    100;
 
-  // Hover edges — neighbors of hovered agent
   const neighborSet = useMemo(() => {
-    if (!hover) return new Set<string>();
+    const target = focused ?? hover;
+    if (!target) return new Set<string>();
     const s = new Set<string>();
     for (const e of derived.edges) {
-      if (e.source === hover) s.add(e.target);
-      if (e.target === hover) s.add(e.source);
+      if (e.source === target) s.add(e.target);
+      if (e.target === target) s.add(e.source);
     }
     return s;
-  }, [hover, derived.edges]);
+  }, [hover, focused, derived.edges]);
 
+  const agentStats = useMemo(() => {
+    const m = new Map<string, { sent: number; recv: number; dropped: number }>();
+    for (const a of derived.agents) {
+      m.set(a.id, { sent: 0, recv: 0, dropped: 0 });
+    }
+    for (const f of derived.flights) {
+      const s = m.get(f.source);
+      const t = m.get(f.target);
+      if (f.kind === 'dropped') {
+        if (s) s.dropped++;
+      } else {
+        if (s) s.sent++;
+        if (t) t.recv++;
+      }
+    }
+    return m;
+  }, [derived]);
+
+  const positions = positionsRef.current;
   const fmt = (t: number) => t.toFixed(2);
 
+  const colorOf = (kind: 'send' | 'broadcast' | 'dropped') =>
+    kind === 'dropped'
+      ? '#8C8576'
+      : kind === 'broadcast'
+      ? '#B58432'
+      : '#C45A3C';
+
+  const tooltipTarget = hover ?? focused;
+  const tooltipPos = tooltipTarget ? positions.get(tooltipTarget) : undefined;
+  const tooltipStats = tooltipTarget ? agentStats.get(tooltipTarget) : undefined;
+
   return (
-    <div className="space-y-6">
-      {/* Stage */}
+    <div className="space-y-4">
       <div className="relative rounded-2xl border border-cream-400/70 bg-cream-50 overflow-hidden">
         <svg
+          ref={svgRef}
           viewBox={`0 0 ${W} ${H}`}
           preserveAspectRatio="xMidYMid meet"
-          className="block w-full"
-          style={{ aspectRatio: `${W} / ${H}` }}
+          className="block w-full select-none"
+          style={{ aspectRatio: `${W} / ${H}`, cursor: 'grab', touchAction: 'none' }}
+          onPointerDown={startBgPan}
         >
           <defs>
-            <radialGradient id="msg-glow-send" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stopColor="#C45A3C" stopOpacity="0.9" />
-              <stop offset="100%" stopColor="#C45A3C" stopOpacity="0" />
+            <radialGradient id="bg-radial" cx="50%" cy="50%" r="75%">
+              <stop offset="0%" stopColor="#F7F5EF" />
+              <stop offset="100%" stopColor="#EDE7D6" />
             </radialGradient>
-            <radialGradient id="msg-glow-broadcast" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stopColor="#B58432" stopOpacity="0.9" />
-              <stop offset="100%" stopColor="#B58432" stopOpacity="0" />
-            </radialGradient>
-            <radialGradient id="msg-glow-dropped" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stopColor="#8C8576" stopOpacity="0.9" />
-              <stop offset="100%" stopColor="#8C8576" stopOpacity="0" />
-            </radialGradient>
+            <pattern id="dot-grid" width="22" height="22" patternUnits="userSpaceOnUse">
+              <circle cx="1" cy="1" r="0.7" fill="#C9C1AB" opacity="0.45" />
+            </pattern>
+            <filter id="msg-glow" x="-60%" y="-60%" width="220%" height="220%">
+              <feGaussianBlur stdDeviation="2.2" result="blur" />
+              <feMerge>
+                <feMergeNode in="blur" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+            <filter id="node-glow" x="-40%" y="-40%" width="180%" height="180%">
+              <feGaussianBlur stdDeviation="3" result="blur" />
+              <feMerge>
+                <feMergeNode in="blur" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
           </defs>
 
-          {/* Static edges — only ones with traffic in current window */}
-          {derived.edges.map((e) => {
-            const p1 = positionsRef.current.get(e.source);
-            const p2 = positionsRef.current.get(e.target);
-            if (!p1 || !p2) return null;
-            const key = `${e.source} ${e.target}`;
-            const recent = recentEdges.get(key) ?? 0;
-            if (recent === 0 && hover === null) return null;
-            const isHovered =
-              hover &&
-              (e.source === hover || e.target === hover);
-            const intensity = recent / maxRecent;
-            const opacity = isHovered ? 0.45 : 0.06 + intensity * 0.22;
-            const thickness = isHovered ? 1.5 : 0.6 + intensity * 1.4;
-            return (
-              <line
-                key={key}
-                x1={p1.x}
-                y1={p1.y}
-                x2={p2.x}
-                y2={p2.y}
-                stroke={isHovered ? '#C45A3C' : '#221F1A'}
-                strokeWidth={thickness}
-                strokeOpacity={opacity}
-                strokeLinecap="round"
-              />
-            );
-          })}
+          <rect width={W} height={H} fill="url(#bg-radial)" />
+          <rect width={W} height={H} fill="url(#dot-grid)" />
 
-          {/* In-flight messages — small twig segments oriented along travel */}
-          {inFlight.map((f, i) => {
-            const p1 = positionsRef.current.get(f.source);
-            const p2 = positionsRef.current.get(f.target);
-            if (!p1 || !p2) return null;
-            const dx = p2.x - p1.x;
-            const dy = p2.y - p1.y;
-            const len = Math.hypot(dx, dy) || 1;
-            const ux = dx / len;
-            const uy = dy / len;
-            const cxp = p1.x + dx * f.progress;
-            const cyp = p1.y + dy * f.progress;
-            const twigLen = 9;
-            const x1 = cxp - ux * twigLen * 0.5;
-            const y1 = cyp - uy * twigLen * 0.5;
-            const x2 = cxp + ux * twigLen * 0.5;
-            const y2 = cyp + uy * twigLen * 0.5;
-            const stroke =
-              f.kind === 'dropped'
-                ? '#8C8576'
-                : f.kind === 'broadcast'
-                ? '#B58432'
-                : '#C45A3C';
-            const fade =
-              f.progress >= 1
-                ? Math.max(0, 1 - (f.progress - 1) * 4)
-                : 0.4 + f.progress * 0.6;
-            return (
-              <g key={i} style={{ opacity: fade }}>
+          <g transform={`translate(${view.x},${view.y}) scale(${view.k})`}>
+            {/* Static edges — always visible, weighted by total + recent traffic */}
+            {derived.edges.map((e) => {
+              if (!e.source || !e.target || e.source === e.target) return null;
+              const p1 = positions.get(e.source);
+              const p2 = positions.get(e.target);
+              if (!p1 || !p2) return null;
+              const key = edgeKey(e.source, e.target);
+              const recent = recentEdges.get(key) ?? 0;
+              const total = e.count / maxTotal;
+
+              const isFocusEdge =
+                focused && (e.source === focused || e.target === focused);
+              const isHoverEdge =
+                hover && (e.source === hover || e.target === hover);
+
+              let stroke = '#221F1A';
+              let opacity = 0.05 + total * 0.12;
+              let width = 0.5 + total * 1.0;
+
+              if (recent > 0) {
+                stroke = '#C45A3C';
+                opacity = 0.30 + (recent / maxRecent) * 0.50;
+                width = 0.9 + (recent / maxRecent) * 2.0;
+              }
+
+              if (focused) {
+                if (isFocusEdge) {
+                  stroke = '#C45A3C';
+                  opacity = 0.75;
+                  width = Math.max(width, 1.6);
+                } else {
+                  opacity *= 0.18;
+                }
+              } else if (hover) {
+                if (isHoverEdge) {
+                  stroke = '#C45A3C';
+                  opacity = 0.6;
+                  width = Math.max(width, 1.4);
+                } else {
+                  opacity *= 0.45;
+                }
+              }
+
+              return (
                 <line
-                  x1={x1}
-                  y1={y1}
-                  x2={x2}
-                  y2={y2}
+                  key={key}
+                  x1={p1.x}
+                  y1={p1.y}
+                  x2={p2.x}
+                  y2={p2.y}
                   stroke={stroke}
-                  strokeWidth={2.4}
+                  strokeWidth={width}
+                  strokeOpacity={opacity}
                   strokeLinecap="round"
                 />
-                <circle cx={x2} cy={y2} r={1.8} fill={stroke} />
-              </g>
-            );
-          })}
+              );
+            })}
 
-          {/* Agent nodes — line-art icons, no background */}
-          {derived.agents.map((a) => {
-            const pos = positionsRef.current.get(a.id);
-            if (!pos) return null;
-            const active = activeAgents.has(a.id);
-            const dimmed = hover && hover !== a.id && !neighborSet.has(a.id);
-            const dense = derived.agents.length > 30;
-            const baseSize = dense ? 16 : 24;
-            const size =
-              hover === a.id
-                ? baseSize + 6
-                : active
-                ? baseSize + 2
-                : baseSize;
-            const color = roleColor(a.role);
-            const hitRadius = size * 0.7;
-            return (
-              <g
-                key={a.id}
-                onMouseEnter={() => setHover(a.id)}
-                onMouseLeave={() => setHover(null)}
-                style={{
-                  cursor: 'pointer',
-                  opacity: dimmed ? 0.22 : 1,
-                  transition: 'opacity 0.2s ease',
-                }}
-              >
-                {active && (
+            {/* Ripples — emanating pulses on each send/receive moment */}
+            <g style={{ pointerEvents: 'none' }}>
+              {ripples.map((r, i) => {
+                const pos = positions.get(r.id);
+                if (!pos) return null;
+                const lifetime = 1.4;
+                const age = Math.max(0, simTime - r.t0);
+                const t = Math.min(1, age / lifetime);
+                const radius = 8 + t * 34;
+                const opacity = (1 - t) * 0.55;
+                const stroke = r.kind === 'send' ? '#C45A3C' : '#5C6E5A';
+                return (
+                  <circle
+                    key={`${r.id}-${r.t0}-${r.kind}-${i}`}
+                    cx={pos.x}
+                    cy={pos.y}
+                    r={radius}
+                    fill="none"
+                    stroke={stroke}
+                    strokeWidth={1.3}
+                    opacity={opacity}
+                  />
+                );
+              })}
+            </g>
+
+            {/* In-flight messages — head + glowing tail */}
+            <g filter="url(#msg-glow)">
+              {inFlight.map((f, i) => {
+                const p1 = positions.get(f.source);
+                const p2 = positions.get(f.target);
+                if (!p1 || !p2) return null;
+                const dx = p2.x - p1.x;
+                const dy = p2.y - p1.y;
+                const len = Math.hypot(dx, dy) || 1;
+                const headX = p1.x + dx * f.progress;
+                const headY = p1.y + dy * f.progress;
+                const tailLen = Math.min(0.18, 30 / len);
+                const tailP = Math.max(0, f.progress - tailLen);
+                const tailX = p1.x + dx * tailP;
+                const tailY = p1.y + dy * tailP;
+                const stroke = colorOf(f.kind);
+                const fade =
+                  f.progress >= 1
+                    ? Math.max(0, 1 - (f.progress - 1) * 6)
+                    : 0.55 + f.progress * 0.45;
+                if (f.kind === 'dropped') {
+                  return (
+                    <g key={i} style={{ opacity: fade }}>
+                      <line
+                        x1={tailX}
+                        y1={tailY}
+                        x2={headX}
+                        y2={headY}
+                        stroke={stroke}
+                        strokeWidth={2}
+                        strokeLinecap="round"
+                        strokeDasharray="3 3"
+                        opacity={0.7}
+                      />
+                      <circle
+                        cx={headX}
+                        cy={headY}
+                        r={3}
+                        fill="none"
+                        stroke={stroke}
+                        strokeWidth={1.4}
+                      />
+                    </g>
+                  );
+                }
+                return (
+                  <g key={i} style={{ opacity: fade }}>
+                    <line
+                      x1={tailX}
+                      y1={tailY}
+                      x2={headX}
+                      y2={headY}
+                      stroke={stroke}
+                      strokeWidth={2.8}
+                      strokeLinecap="round"
+                      opacity={0.85}
+                    />
+                    <circle cx={headX} cy={headY} r={3.6} fill={stroke} />
+                  </g>
+                );
+              })}
+            </g>
+
+            {/* Agent nodes — line-art icons with drag */}
+            {derived.agents.map((a) => {
+              const pos = positions.get(a.id);
+              if (!pos) return null;
+              const active = activeAgents.has(a.id);
+              const isHover = hover === a.id;
+              const isFocus = focused === a.id;
+              const dimmed =
+                (focused && focused !== a.id && !neighborSet.has(a.id)) ||
+                (!focused && hover && hover !== a.id && !neighborSet.has(a.id));
+              const dense = derived.agents.length > 30;
+              const baseSize = dense ? 17 : 24;
+              const size =
+                isHover || isFocus
+                  ? baseSize + 6
+                  : active
+                  ? baseSize + 2
+                  : baseSize;
+              const color = roleColor(a.role);
+              const hitRadius = size * 0.85;
+              const showLabel =
+                derived.agents.length <= 24 || isHover || isFocus;
+              return (
+                <g
+                  key={a.id}
+                  data-agent={a.id}
+                  onPointerDown={(e) => startNodeDrag(a.id, e)}
+                  onMouseEnter={() => setHover(a.id)}
+                  onMouseLeave={() => setHover(null)}
+                  style={{
+                    cursor: 'grab',
+                    opacity: dimmed ? 0.18 : 1,
+                    transition: 'opacity 0.2s ease',
+                  }}
+                >
+                  {(active || isHover || isFocus) && (
+                    <circle
+                      cx={pos.x}
+                      cy={pos.y}
+                      r={size * 0.7}
+                      fill={color}
+                      fillOpacity={isFocus ? 0.18 : isHover ? 0.14 : 0.08}
+                      stroke={color}
+                      strokeOpacity={isFocus ? 0.55 : 0.4}
+                      strokeWidth={isFocus ? 1.4 : 1}
+                    />
+                  )}
+                  <g filter={active ? 'url(#node-glow)' : undefined}>
+                    <RoleIcon
+                      role={a.role}
+                      cx={pos.x}
+                      cy={pos.y}
+                      size={size}
+                      color={color}
+                      strokeWidth={isHover || isFocus ? 1.8 : 1.4}
+                    />
+                  </g>
                   <circle
                     cx={pos.x}
                     cy={pos.y}
-                    r={size * 0.65}
-                    fill={color}
-                    fillOpacity={0.08}
-                    stroke={color}
-                    strokeOpacity={0.35}
-                    strokeWidth={1}
+                    r={hitRadius}
+                    fill="transparent"
                   />
-                )}
-                <RoleIcon
-                  role={a.role}
-                  cx={pos.x}
-                  cy={pos.y}
-                  size={size}
-                  color={color}
-                  strokeWidth={hover === a.id ? 1.7 : 1.4}
-                />
-                {/* Invisible hit area so small icons are still hoverable */}
-                <circle
-                  cx={pos.x}
-                  cy={pos.y}
-                  r={hitRadius}
-                  fill="transparent"
-                />
-                {(derived.agents.length <= 24 || hover === a.id) && (
-                  <text
-                    x={pos.x}
-                    y={pos.y + size * 0.65 + 11}
-                    textAnchor="middle"
-                    fontSize={9}
-                    fontWeight={500}
-                    fill="#353129"
-                    style={{ pointerEvents: 'none' }}
-                  >
-                    {a.id}
-                  </text>
-                )}
-              </g>
-            );
-          })}
+                  {showLabel && (
+                    <text
+                      x={pos.x}
+                      y={pos.y + size * 0.7 + 11}
+                      textAnchor="middle"
+                      fontSize={9}
+                      fontWeight={500}
+                      fill="#353129"
+                      style={{ pointerEvents: 'none' }}
+                    >
+                      {a.id}
+                    </text>
+                  )}
+                </g>
+              );
+            })}
+          </g>
         </svg>
+
+        {/* Tooltip */}
+        {tooltipTarget && tooltipPos && tooltipStats && (
+          <div
+            className="pointer-events-none absolute z-10 rounded-lg border border-cream-400/80 bg-cream-50/95 shadow-md px-3 py-2 text-[11px] text-ink-700"
+            style={{
+              left: `calc(${((tooltipPos.x * view.k + view.x) / W) * 100}% + 14px)`,
+              top: `calc(${((tooltipPos.y * view.k + view.y) / H) * 100}% - 10px)`,
+              transform: 'translateY(-100%)',
+            }}
+          >
+            <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink-400">
+              {tooltipTarget}
+            </div>
+            <div className="mt-1 flex gap-3 font-mono tabular-nums">
+              <span>
+                <span className="text-rust">●</span> {tooltipStats.sent} sent
+              </span>
+              <span>
+                <span className="text-sage">●</span> {tooltipStats.recv} recv
+              </span>
+              {tooltipStats.dropped > 0 && (
+                <span>
+                  <span className="text-ink-300">●</span>{' '}
+                  {tooltipStats.dropped} dropped
+                </span>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Sim time overlay */}
         <div className="absolute left-4 top-4 flex items-center gap-2 rounded-full border border-cream-400/70 bg-cream-50/90 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.22em] text-ink-500">
@@ -1186,9 +1368,7 @@ function Player({ derived }: PlayerProps) {
           <span className="flex items-center gap-1.5">
             <span className="inline-block h-1.5 w-1.5 rounded-full bg-sage" />
             <span className="text-ink-300">recv</span>
-            <span className="text-ink-900 tabular-nums">
-              {counters.received}
-            </span>
+            <span className="text-ink-900 tabular-nums">{counters.received}</span>
           </span>
           <span className="flex items-center gap-1.5">
             <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber" />
@@ -1199,53 +1379,128 @@ function Player({ derived }: PlayerProps) {
             <span className="flex items-center gap-1.5">
               <span className="inline-block h-1.5 w-1.5 rounded-full bg-ink-300" />
               <span className="text-ink-300">drop</span>
-              <span className="text-ink-900 tabular-nums">
-                {counters.dropped}
-              </span>
+              <span className="text-ink-900 tabular-nums">{counters.dropped}</span>
             </span>
           )}
         </div>
+
+        {/* View controls */}
+        <div className="absolute left-4 bottom-4 flex items-center gap-1 rounded-full border border-cream-400/70 bg-cream-50/90 px-1 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-ink-500">
+          <button
+            type="button"
+            onClick={() =>
+              setView((v) => {
+                const k = Math.min(4, v.k * 1.2);
+                const r = k / v.k;
+                return {
+                  k,
+                  x: W / 2 - (W / 2 - v.x) * r,
+                  y: H / 2 - (H / 2 - v.y) * r,
+                };
+              })
+            }
+            className="h-6 w-6 rounded-full hover:bg-cream-200"
+            aria-label="Zoom in"
+          >
+            +
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              setView((v) => {
+                const k = Math.max(0.4, v.k / 1.2);
+                const r = k / v.k;
+                return {
+                  k,
+                  x: W / 2 - (W / 2 - v.x) * r,
+                  y: H / 2 - (H / 2 - v.y) * r,
+                };
+              })
+            }
+            className="h-6 w-6 rounded-full hover:bg-cream-200"
+            aria-label="Zoom out"
+          >
+            −
+          </button>
+          <button
+            type="button"
+            onClick={resetView}
+            className="h-6 px-2 rounded-full hover:bg-cream-200"
+            aria-label="Reset view"
+          >
+            fit
+          </button>
+        </div>
+
+        {/* Focus banner */}
+        {focused && (
+          <div className="absolute bottom-4 right-4 flex items-center gap-2 rounded-full border border-rust/40 bg-rust-bg/90 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-rust">
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-rust" />
+            <span>focus · {focused}</span>
+            <button
+              type="button"
+              onClick={() => setFocused(null)}
+              className="ml-1 text-rust hover:text-ink-900"
+            >
+              ✕
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Transport controls */}
-      <div className="flex flex-col gap-3 rounded-2xl border border-cream-400/70 bg-cream-50 px-5 py-4 sm:flex-row sm:items-center">
-        <button
-          onClick={() => {
-            if (simTime >= derived.tMax) setSimTime(derived.tMin);
-            setPlaying((p) => !p);
-          }}
-          className="inline-flex h-9 w-20 items-center justify-center rounded-full bg-ink-900 text-cream-50 text-[0.85rem] font-medium hover:bg-ink-700 transition-colors"
-        >
-          {playing ? 'Pause' : simTime >= derived.tMax ? 'Replay' : 'Play'}
-        </button>
+      {/* Hint */}
+      <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink-300 px-1">
+        drag nodes to rearrange · scroll to zoom · drag canvas to pan · click an
+        agent to focus
+      </div>
 
-        <input
-          type="range"
-          min={0}
-          max={1000}
-          value={pct * 10}
-          onChange={(ev) => {
-            const v = Number(ev.target.value) / 1000;
-            setSimTime(derived.tMin + v * (derived.tMax - derived.tMin));
-          }}
-          className="flex-1 accent-rust"
+      {/* Sparkline + transport controls */}
+      <div className="rounded-2xl border border-cream-400/70 bg-cream-50 px-5 py-4 space-y-3">
+        <Sparkline
+          derived={derived}
+          simTime={simTime}
+          onSeek={(t) => setSimTime(t)}
         />
 
-        <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.22em] text-ink-400">
-          <span>speed</span>
-          {[0.25, 0.5, 1, 2, 4].map((s) => (
-            <button
-              key={s}
-              onClick={() => setSpeed(s)}
-              className={`px-2 py-1 rounded ${
-                speed === s
-                  ? 'bg-ink-900 text-cream-50'
-                  : 'text-ink-500 hover:bg-cream-200'
-              }`}
-            >
-              {s}×
-            </button>
-          ))}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <button
+            onClick={() => {
+              if (simTime >= derived.tMax) setSimTime(derived.tMin);
+              setPlaying((p) => !p);
+            }}
+            className="inline-flex h-9 w-20 items-center justify-center rounded-full bg-ink-900 text-cream-50 text-[0.85rem] font-medium hover:bg-ink-700 transition-colors"
+          >
+            {playing ? 'Pause' : simTime >= derived.tMax ? 'Replay' : 'Play'}
+          </button>
+
+          <input
+            type="range"
+            min={0}
+            max={1000}
+            value={Math.round(pct * 10)}
+            onChange={(ev) => {
+              const v = Number(ev.target.value) / 1000;
+              setSimTime(derived.tMin + v * (derived.tMax - derived.tMin));
+            }}
+            className="flex-1 accent-rust"
+          />
+
+          <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.22em] text-ink-400">
+            <span>speed</span>
+            {[0.25, 0.5, 1, 2, 4].map((s) => (
+              <button
+                key={s}
+                onClick={() => setSpeed(s)}
+                className={`px-2 py-1 rounded ${
+                  speed === s
+                    ? 'bg-ink-900 text-cream-50'
+                    : 'text-ink-500 hover:bg-cream-200'
+                }`}
+              >
+                {s}×
+              </button>
+            ))}
+          </div>
         </div>
       </div>
     </div>
@@ -1253,7 +1508,80 @@ function Player({ derived }: PlayerProps) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Side panels (legend + agent table)                                */
+/*  Sparkline of message density + scrub cursor                       */
+/* ------------------------------------------------------------------ */
+
+interface SparklineProps {
+  derived: Derived;
+  simTime: number;
+  onSeek: (t: number) => void;
+}
+
+function Sparkline({ derived, simTime, onSeek }: SparklineProps) {
+  const W = 800;
+  const H = 36;
+  const bins = 80;
+
+  const { hist, max } = useMemo(() => {
+    const arr = new Array(bins).fill(0) as number[];
+    const span = Math.max(derived.tMax - derived.tMin, 1e-6);
+    for (const f of derived.flights) {
+      const i = Math.min(
+        bins - 1,
+        Math.max(0, Math.floor(((f.tStart - derived.tMin) / span) * bins)),
+      );
+      arr[i] += 1;
+    }
+    return { hist: arr, max: Math.max(1, ...arr) };
+  }, [derived]);
+
+  const span = derived.tMax - derived.tMin || 1;
+  const cursorX = ((simTime - derived.tMin) / span) * W;
+
+  const svgRef = useRef<SVGSVGElement>(null);
+  const seekFromEvent = (clientX: number) => {
+    const target = svgRef.current;
+    if (!target) return;
+    const rect = target.getBoundingClientRect();
+    const f = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    onSeek(derived.tMin + f * span);
+  };
+
+  return (
+    <svg
+      ref={svgRef}
+      viewBox={`0 0 ${W} ${H}`}
+      preserveAspectRatio="none"
+      className="block w-full h-9 cursor-pointer"
+      onClick={(e) => seekFromEvent(e.clientX)}
+    >
+      <line x1={0} y1={H - 0.5} x2={W} y2={H - 0.5} stroke="#C9C1AB" strokeWidth={1} />
+      {hist.map((v, i) => {
+        const x = (i / bins) * W;
+        const w = W / bins - 1;
+        const h = (v / max) * (H - 6);
+        const colored = (i / bins) * span + derived.tMin <= simTime;
+        return (
+          <rect
+            key={i}
+            x={x}
+            y={H - h}
+            width={Math.max(1, w)}
+            height={h}
+            rx={1}
+            fill={colored ? '#C45A3C' : '#C9C1AB'}
+            opacity={colored ? 0.75 : 0.55}
+          />
+        );
+      })}
+      <line x1={cursorX} y1={0} x2={cursorX} y2={H} stroke="#221F1A" strokeWidth={1.2} />
+      <circle cx={cursorX} cy={4} r={2.4} fill="#221F1A" />
+    </svg>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Legend                                                             */
 /* ------------------------------------------------------------------ */
 
 function Legend({ agents }: { agents: Agent[] }) {
@@ -1278,13 +1606,7 @@ function Legend({ agents }: { agents: Agent[] }) {
             >
               <span className="flex items-center gap-2.5">
                 <svg width={22} height={22} viewBox="0 0 22 22">
-                  <RoleIcon
-                    role={role}
-                    cx={11}
-                    cy={11}
-                    size={20}
-                    color={color}
-                  />
+                  <RoleIcon role={role} cx={11} cy={11} size={20} color={color} />
                 </svg>
                 <span className="capitalize text-ink-700">{role}</span>
               </span>
@@ -1301,46 +1623,21 @@ function Legend({ agents }: { agents: Agent[] }) {
         </p>
         <div className="flex items-center gap-2">
           <svg width={20} height={8} viewBox="0 0 20 8">
-            <line
-              x1="2"
-              y1="4"
-              x2="18"
-              y2="4"
-              stroke="#C45A3C"
-              strokeWidth={2.2}
-              strokeLinecap="round"
-            />
+            <line x1="2" y1="4" x2="18" y2="4" stroke="#C45A3C" strokeWidth={2.2} strokeLinecap="round" />
             <circle cx="18" cy="4" r="1.6" fill="#C45A3C" />
           </svg>
           <span>send</span>
         </div>
         <div className="flex items-center gap-2">
           <svg width={20} height={8} viewBox="0 0 20 8">
-            <line
-              x1="2"
-              y1="4"
-              x2="18"
-              y2="4"
-              stroke="#B58432"
-              strokeWidth={2.2}
-              strokeLinecap="round"
-            />
+            <line x1="2" y1="4" x2="18" y2="4" stroke="#B58432" strokeWidth={2.2} strokeLinecap="round" />
             <circle cx="18" cy="4" r="1.6" fill="#B58432" />
           </svg>
           <span>broadcast</span>
         </div>
         <div className="flex items-center gap-2">
           <svg width={20} height={8} viewBox="0 0 20 8">
-            <line
-              x1="2"
-              y1="4"
-              x2="18"
-              y2="4"
-              stroke="#8C8576"
-              strokeWidth={2.2}
-              strokeLinecap="round"
-              strokeDasharray="2 2"
-            />
+            <line x1="2" y1="4" x2="18" y2="4" stroke="#8C8576" strokeWidth={2.2} strokeLinecap="round" strokeDasharray="2 2" />
           </svg>
           <span>dropped</span>
         </div>
@@ -1349,26 +1646,47 @@ function Legend({ agents }: { agents: Agent[] }) {
   );
 }
 
-function MessageStream({
-  derived,
-  limit = 80,
-}: {
+/* ------------------------------------------------------------------ */
+/*  MessageStream — windowed live feed centered on simTime            */
+/* ------------------------------------------------------------------ */
+
+interface MessageStreamProps {
   derived: Derived;
-  limit?: number;
-}) {
+  simTime: number;
+}
+
+function MessageStream({ derived, simTime }: MessageStreamProps) {
   const recent = useMemo(() => {
-    const sorted = [...derived.flights].sort((a, b) => b.tStart - a.tStart);
-    return sorted.slice(0, limit);
-  }, [derived.flights, limit]);
+    const span = Math.max(derived.tMax - derived.tMin, 1e-6);
+    const lookback = span * 0.08;
+    const cut = simTime - lookback;
+    const result: Flight[] = [];
+    for (let i = derived.flights.length - 1; i >= 0; i--) {
+      const f = derived.flights[i];
+      if (f.tStart > simTime) continue;
+      if (f.tStart < cut) break;
+      result.push(f);
+      if (result.length >= 80) break;
+    }
+    return result;
+  }, [derived, simTime]);
 
   return (
     <div className="rounded-2xl border border-cream-400/70 bg-cream-50">
-      <div className="border-b border-cream-400/70 px-5 py-3">
+      <div className="border-b border-cream-400/70 px-5 py-3 flex items-center justify-between">
         <h3 className="font-mono text-[10px] uppercase tracking-[0.22em] text-ink-400">
-          Latest messages
+          Live stream
         </h3>
+        <span className="font-mono text-[10px] tabular-nums text-ink-300">
+          {recent.length}
+        </span>
       </div>
       <ul className="max-h-[420px] overflow-y-auto divide-y divide-cream-400/40 text-[0.78rem]">
+        {recent.length === 0 && (
+          <li className="px-4 py-4 font-mono text-[10px] uppercase tracking-[0.18em] text-ink-300">
+            quiet…
+          </li>
+        )}
         {recent.map((f, i) => (
           <li
             key={i}
@@ -1413,7 +1731,11 @@ export default function VisualizerPage() {
   const [customName, setCustomName] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Load a bundled scenario
+  // Playback state — lifted so MessageStream can subscribe too
+  const [simTime, setSimTime] = useState(0);
+  const [playing, setPlaying] = useState(true);
+  const [speed, setSpeed] = useState(1);
+
   const loadScenario = useCallback(async (id: string) => {
     const s = SCENARIOS.find((sc) => sc.id === id);
     if (!s) return;
@@ -1437,8 +1759,6 @@ export default function VisualizerPage() {
   }, []);
 
   useEffect(() => {
-    // Defer to a microtask so the synchronous setState calls inside
-    // loadScenario don't fire inside the effect body itself.
     void Promise.resolve().then(() => loadScenario('auction'));
   }, [loadScenario]);
 
@@ -1468,9 +1788,16 @@ export default function VisualizerPage() {
     [events],
   );
 
+  // Reset playback when a new trace loads
+  useEffect(() => {
+    if (derived) {
+      setSimTime(derived.tMin);
+      setPlaying(true);
+    }
+  }, [derived]);
+
   return (
     <div className="bg-cream-100">
-      {/* Header */}
       <section className="paper-texture border-b border-cream-400/70">
         <div className="mx-auto max-w-[1240px] px-6 sm:px-10 pt-20 pb-14">
           <div className="flex items-center gap-3 mb-10 animate-fade-in">
@@ -1495,8 +1822,8 @@ export default function VisualizerPage() {
               </h1>
             </div>
             <p className="animate-fade-in stagger-2 text-[1.1rem] leading-[1.6] text-ink-500 max-w-md">
-              Every twig is a real message from a real NEST trace. Pick a
-              scenario, scrub the timeline, or drop in a{' '}
+              Every pulse is a real message from a real NEST trace. Drag agents
+              around, scrub the timeline, or drop in a{' '}
               <span className="font-mono text-rust">.jsonl</span> from your own{' '}
               <span className="font-mono text-rust">nest run</span>.
             </p>
@@ -1505,7 +1832,6 @@ export default function VisualizerPage() {
       </section>
 
       <div className="mx-auto max-w-[1240px] px-6 sm:px-10 py-10">
-        {/* Scenario picker */}
         <div className="animate-fade-in stagger-1">
           <div className="flex items-center justify-between gap-4 mb-4">
             <h2 className="font-mono text-[10px] uppercase tracking-[0.22em] text-ink-400">
@@ -1544,11 +1870,7 @@ export default function VisualizerPage() {
                   {active && (
                     <span className="absolute left-0 top-0 h-full w-[3px] bg-rust" />
                   )}
-                  <div
-                    className={`text-[0.92rem] font-medium ${
-                      active ? 'text-ink-900' : 'text-ink-900'
-                    }`}
-                  >
+                  <div className="text-[0.92rem] font-medium text-ink-900">
                     {s.name}
                   </div>
                   <div
@@ -1574,7 +1896,6 @@ export default function VisualizerPage() {
           </div>
         </div>
 
-        {/* Status row */}
         {loading && (
           <p className="mt-8 font-mono text-[11px] uppercase tracking-[0.22em] text-ink-400">
             Loading trace…
@@ -1586,10 +1907,8 @@ export default function VisualizerPage() {
           </p>
         )}
 
-        {/* Summary + Player + side panels */}
         {derived && (
           <div className="mt-8 animate-fade-in stagger-2">
-            {/* Summary */}
             <div className="mb-8 grid grid-cols-2 md:grid-cols-5 gap-6 border-t border-rust/40 pt-8">
               {[
                 { label: 'Agents', value: derived.agents.length, accent: '#C45A3C' },
@@ -1627,12 +1946,20 @@ export default function VisualizerPage() {
               ))}
             </div>
 
-            {/* Player + sidebar */}
             <div className="grid gap-6 lg:grid-cols-[1fr_300px]">
-              <Player key={scenarioId} derived={derived} />
+              <Player
+                key={scenarioId}
+                derived={derived}
+                simTime={simTime}
+                setSimTime={setSimTime}
+                playing={playing}
+                setPlaying={setPlaying}
+                speed={speed}
+                setSpeed={setSpeed}
+              />
               <div className="space-y-6">
                 <Legend agents={derived.agents} />
-                <MessageStream derived={derived} />
+                <MessageStream derived={derived} simTime={simTime} />
               </div>
             </div>
           </div>
