@@ -585,15 +585,20 @@ class OpenAIProvider:
     async def judge(self, *, system_blocks: list[dict[str, Any]], user: str) -> str:
         client = self._get_client()
         system_text = self._flatten_system(system_blocks)
-        response: Any = await client.chat.completions.create(
-            model=self._model,
-            messages=[
+        kwargs: dict[str, Any] = {
+            "model": self._model,
+            "messages": [
                 {"role": "system", "content": system_text},
                 {"role": "user", "content": user},
             ],
-            temperature=0.0,
-            response_format={"type": "json_object"},
-        )
+            "response_format": {"type": "json_object"},
+        }
+        # Newer OpenAI reasoning models (gpt-5.x family) reject any temperature
+        # value other than the default (1). Older chat models accept temperature=0
+        # for determinism. Only pass temperature when the model accepts it.
+        if not self._model.startswith("gpt-5"):
+            kwargs["temperature"] = 0.0
+        response: Any = await client.chat.completions.create(**kwargs)
         choices = cast("list[Any]", getattr(response, "choices", []))
         if not choices:
             return ""
