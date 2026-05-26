@@ -83,9 +83,19 @@ extraPaths = [
     "packages/nest-scenarios",
     "packages/nest-shell",
     "packages/nest-plugins-reference",
+    ".",
 ]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["packages"]
+testpaths = ["packages", "scripts/harness/dry_run"]
 addopts = ["--import-mode=importlib"]
+pythonpath = ["."]
+
+# Optional extras: the `harness` extra adds plotting deps for analyze.py.
+# Keeping it optional means the core repo (and CI) stays matplotlib-free.
+[project.optional-dependencies]
+harness = [
+    "matplotlib>=3.8",
+    "PyYAML>=6.0",
+]
