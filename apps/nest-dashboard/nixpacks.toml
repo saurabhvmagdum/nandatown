@@ -1,4 +1,4 @@
-# Nixpacks build plan for the NEST dashboard (Next.js 16).
+# Nixpacks build plan for the Nanda Town dashboard (Next.js 16).
 #
 # Use with Railway's Root Directory set to `apps/nest-dashboard` so the
 # repo's Python files (pyproject.toml, uv.lock) don't trip the Node
