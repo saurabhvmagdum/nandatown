@@ -13,7 +13,7 @@ export function Footer() {
               aria-label="Nanda Town by Project NANDA — home"
             >
               <Image
-                src="/brand/nest-logo.png"
+                src="/brand/nandatown-logo.png"
                 alt=""
                 width={40}
                 height={40}

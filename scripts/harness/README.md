@@ -1,7 +1,7 @@
 # Nanda Town research harness
 
 Multi-condition, reproducible, dataset-producing infrastructure for running
-hackathon-style A/B experiments against the `nest` repo.
+hackathon-style A/B experiments against the `nandatown` repo.
 
 This directory ships:
 

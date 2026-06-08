@@ -1846,7 +1846,7 @@ export default function VisualizerPage() {
           <div className="grid gap-12 lg:grid-cols-[1.4fr_1fr] lg:items-end">
             <div className="animate-fade-in stagger-1 flex items-start gap-5">
               <Image
-                src="/nest-badge.png"
+                src="/nandatown-badge.png"
                 alt=""
                 width={120}
                 height={80}

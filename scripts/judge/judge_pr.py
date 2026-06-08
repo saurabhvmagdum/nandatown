@@ -58,7 +58,7 @@ class PRContext:
 
     Example::
 
-        ctx = fetch_pr_context(2, owner="mariagorskikh", repo="nest")
+        ctx = fetch_pr_context(2, owner="projnanda", repo="nandatown")
     """
 
     number: int
@@ -280,7 +280,7 @@ def fetch_pr_context(pr_number: int, *, owner: str, repo: str) -> PRContext:
 
     Example::
 
-        ctx = fetch_pr_context(2, owner="mariagorskikh", repo="nest")
+        ctx = fetch_pr_context(2, owner="projnanda", repo="nandatown")
     """
     pr_url = f"{GITHUB_API}/repos/{owner}/{repo}/pulls/{pr_number}"
     pr_json = json.loads(_gh_get(pr_url).decode("utf-8"))
@@ -759,8 +759,8 @@ async def judge_pr(
     *,
     n_judges: int = 3,
     model: str = "claude-opus-4-7",
-    owner: str = "mariagorskikh",
-    repo: str = "nest",
+    owner: str = "projnanda",
+    repo: str = "nandatown",
     client: _JudgeClient | None = None,
     ctx: PRContext | None = None,
     provider: str = "anthropic",

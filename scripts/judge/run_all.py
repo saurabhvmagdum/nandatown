@@ -108,7 +108,7 @@ def list_hackathon_prs(owner: str, repo: str) -> list[dict[str, Any]]:
 
     Example::
 
-        prs = list_hackathon_prs("mariagorskikh", "nest")
+        prs = list_hackathon_prs("projnanda", "nandatown")
     """
     url = f"{GITHUB_API}/repos/{owner}/{repo}/pulls?state=open&per_page=100"
     try:
@@ -281,8 +281,8 @@ async def _score_one(
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Score open hackathon PRs.")
-    parser.add_argument("--owner", default="mariagorskikh")
-    parser.add_argument("--repo", default="nest")
+    parser.add_argument("--owner", default="projnanda")
+    parser.add_argument("--repo", default="nandatown")
     parser.add_argument(
         "--output",
         type=Path,
