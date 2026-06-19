@@ -71,6 +71,12 @@ def _try_load_builtin(name: str) -> None:
         from nest_core.scenarios_builtin.reputation import reputation_factory
 
         register_scenario("reputation", reputation_factory)
+    elif name == "identity_rotation":
+        from nest_core.scenarios_builtin.identity_rotation import (
+            identity_rotation_factory,
+        )
+
+        register_scenario("identity_rotation", identity_rotation_factory)
     elif name == "gossip_registry":
         from nest_core.scenarios_builtin.gossip_registry import gossip_registry_factory
 
