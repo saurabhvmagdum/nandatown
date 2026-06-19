@@ -1051,7 +1051,18 @@ def validate_identity_rotation_signatures(
                 "identity_rotation_signatures",
                 False,
                 "; ".join(problems),
-hackathon/amaancoderx-crdt-memory
+            )
+        ]
+    return [
+        ValidationResult(
+            "identity_rotation_signatures",
+            True,
+            f"{ok_count} honest signatures valid, {attack_count} attacks rejected",
+        )
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Memory convergence (CRDT) validators
 # ---------------------------------------------------------------------------
 
@@ -1154,6 +1165,76 @@ def validate_memory_convergence(
     duplicates: set[str] = set()
     malformed: list[str] = []
 
+    for ev in events:
+        if ev.get("kind") not in ("send", "broadcast"):
+            continue
+        msg = str(ev.get("msg", ""))
+        if not msg.startswith("final:"):
+            continue
+        agent = str(ev.get("agent", ""))
+        body = msg[len("final:") :]
+        try:
+            parsed = json.loads(body)
+            canonical = json.dumps(parsed, sort_keys=True)
+        except (ValueError, TypeError):
+            malformed.append(agent)
+            continue
+        if agent in finals:
+            duplicates.add(agent)
+        finals[agent] = canonical
+
+    results: list[ValidationResult] = []
+
+    if malformed:
+        results.append(
+            ValidationResult(
+                "memory_convergence_wellformed",
+                False,
+                f"{len(malformed)} malformed final record(s): {sorted(set(malformed))}",
+            )
+        )
+
+    if not finals:
+        results.append(
+            ValidationResult(
+                "memory_convergence",
+                False,
+                "no final replica states found in trace",
+            )
+        )
+        return results
+
+    distinct = set(finals.values())
+    if len(distinct) == 1:
+        results.append(
+            ValidationResult(
+                "memory_convergence",
+                True,
+                f"all {len(finals)} replicas converged to identical state",
+            )
+        )
+    else:
+        results.append(
+            ValidationResult(
+                "memory_convergence",
+                False,
+                f"{len(finals)} replicas hold {len(distinct)} distinct final states",
+            )
+        )
+
+    if duplicates:
+        results.append(
+            ValidationResult(
+                "memory_convergence_one_final_per_agent",
+                False,
+                f"agents emitted multiple final records: {sorted(duplicates)}",
+            )
+        )
+
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Streaming payments validators
 # ---------------------------------------------------------------------------
 
@@ -1319,6 +1400,11 @@ def validate_streaming_no_overbill_on_partition(
             True,
             f"verified {len(stream_parties)} streams across "
             f"{len(partition_start)} partition edges, no over-bill",
+        )
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Comms schema-versioning validators (adversarial)
 # ---------------------------------------------------------------------------
 
@@ -1414,69 +1500,15 @@ def _collect_comms_acks(
         if ev.get("kind") not in ("send", "broadcast"):
             continue
         msg = str(ev.get("msg", ""))
-        if not msg.startswith("final:"):
+        if not msg.startswith("ack:"):
             continue
-        agent = str(ev.get("agent", ""))
-        body = msg[len("final:") :]
-        try:
-            parsed = json.loads(body)
-            canonical = json.dumps(parsed, sort_keys=True)
-        except (ValueError, TypeError):
-            malformed.append(agent)
+        parts = msg.split(":", 3)
+        if len(parts) < 3:
             continue
-        if agent in finals:
-            duplicates.add(agent)
-        finals[agent] = canonical
-
-    results: list[ValidationResult] = []
-
-    if malformed:
-        results.append(
-            ValidationResult(
-                "memory_convergence_wellformed",
-                False,
-                f"{len(malformed)} malformed final record(s): {sorted(set(malformed))}",
-            )
-        )
-
-    if not finals:
-        results.append(
-            ValidationResult(
-                "memory_convergence",
-                False,
-                "no final replica states found in trace",
-            )
-        )
-        return results
-
-    distinct = set(finals.values())
-    if len(distinct) == 1:
-        results.append(
-            ValidationResult(
-                "memory_convergence",
-                True,
-                f"all {len(finals)} replicas converged to identical state",
-            )
-        )
-    else:
-        results.append(
-            ValidationResult(
-                "memory_convergence",
-                False,
-                f"{len(finals)} replicas hold {len(distinct)} distinct final states",
-            )
-        )
-
-    if duplicates:
-        results.append(
-            ValidationResult(
-                "memory_convergence_one_final_per_agent",
-                False,
-                f"agents emitted multiple final records: {sorted(duplicates)}",
-            )
-        )
-
-    return results
+        mid, status = parts[1], parts[2]
+        preserved = {f for f in parts[3].split(",") if f} if len(parts) > 3 else set[str]()
+        acks[mid] = (status, preserved)
+    return acks
 
 
 def validate_memory_liveness(
@@ -1513,9 +1545,9 @@ def validate_memory_liveness(
         ]
     return [
         ValidationResult(
-            "identity_rotation_signatures",
+            "memory_liveness",
             True,
-            f"{ok_count} honest signatures valid, {attack_count} attacks rejected",
+            f"all {len(started)} replicas reported a final state",
         )
     ]
 
@@ -1553,18 +1585,8 @@ def validate_identity_rotation_occurred(
             "identity_rotation_occurred",
             True,
             f"{rotations} key rotations observed",
-            "memory_liveness",
-            True,
-            f"all {len(started)} replicas reported a final state",
-        if not msg.startswith("ack:"):
-            continue
-        parts = msg.split(":", 3)
-        if len(parts) < 3:
-            continue
-        mid, status = parts[1], parts[2]
-        preserved = {f for f in parts[3].split(",") if f} if len(parts) > 3 else set[str]()
-        acks[mid] = (status, preserved)
-    return acks
+        )
+    ]
 
 
 def validate_comms_reject_unknown_major(
@@ -1686,9 +1708,11 @@ VALIDATORS: dict[str, list[Any]] = {
     "identity_rotation": [
         validate_identity_rotation_occurred,
         validate_identity_rotation_signatures,
+    ],
     "memory_concurrent_writers": [
         validate_memory_convergence,
         validate_memory_liveness,
+    ],
     "streaming_payments": [
         validate_streaming_conservation,
         validate_streaming_no_drain_after_close,
