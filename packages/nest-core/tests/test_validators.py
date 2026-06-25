@@ -16,6 +16,11 @@ from nest_core.validators import (
     validate_consensus_agreement,
     validate_consensus_no_conflict,
     validate_consensus_validity,
+    validate_empic_escrow_conservation,
+    validate_empic_invalid_delivery_not_paid,
+    validate_empic_no_drain_after_close,
+    validate_empic_no_overbill_on_partition,
+    validate_empic_no_release_without_accepted_delivery,
     validate_events,
     validate_marketplace_no_double_sell,
     validate_marketplace_price_agreement,
@@ -39,6 +44,11 @@ type Event = dict[str, Any]
 
 def _send(agent: str, to: str, msg: str, ts: float = 1.0) -> Event:
     return {"ts": ts, "agent": agent, "kind": "send", "to": to, "msg": msg}
+
+
+def _empic(event: dict[str, Any], *, agent: str = "consumer", tick: int = 0) -> Event:
+    body = {"type": "empic_audit", "tick": tick, **event}
+    return _send(agent, agent, json.dumps(body, sort_keys=True), ts=float(tick))
 
 
 def _broadcast(agent: str, msg: str, ts: float = 1.0) -> Event:
@@ -740,6 +750,156 @@ class TestStreamingValidators:
         assert results[0].passed  # unrelated drop, not a violation
 
 
+class TestEmpicPaymentsValidators:
+    """Tests for EMPIC escrow and delivery validators."""
+
+    def test_conservation_passes(self) -> None:
+        """Debited escrow equals released plus refunded funds."""
+        events = [
+            _empic({"event_type": "empic_escrow_debited", "amount": 50}),
+            _empic({"event_type": "empic_escrow_released", "amount": 20}),
+            _empic({"event_type": "empic_escrow_refunded", "amount": 30}),
+        ]
+
+        results = validate_empic_escrow_conservation(events)
+        assert len(results) == 1
+        assert results[0].passed
+
+    def test_conservation_fails(self) -> None:
+        """Unaccounted escrow fails conservation."""
+        events = [
+            _empic({"event_type": "empic_escrow_debited", "amount": 50}),
+            _empic({"event_type": "empic_escrow_released", "amount": 20}),
+        ]
+
+        results = validate_empic_escrow_conservation(events)
+        assert len(results) == 1
+        assert not results[0].passed
+
+    def test_no_release_without_accepted_delivery(self) -> None:
+        """Release must reference an accepted delivery id."""
+        events = [
+            _empic(
+                {
+                    "event_type": "empic_delivery_evaluated",
+                    "delivery_id": "d1",
+                    "accepted": True,
+                }
+            ),
+            _empic(
+                {
+                    "event_type": "empic_escrow_released",
+                    "payment_ref": "p1",
+                    "delivery_id": "d1",
+                    "amount": 10,
+                }
+            ),
+        ]
+
+        results = validate_empic_no_release_without_accepted_delivery(events)
+        assert len(results) == 1
+        assert results[0].passed
+
+    def test_release_without_accepted_delivery_fails(self) -> None:
+        """Release against rejected evidence fails."""
+        events = [
+            _empic(
+                {
+                    "event_type": "empic_delivery_evaluated",
+                    "delivery_id": "d1",
+                    "accepted": False,
+                }
+            ),
+            _empic(
+                {
+                    "event_type": "empic_escrow_released",
+                    "payment_ref": "p1",
+                    "delivery_id": "d1",
+                    "amount": 10,
+                }
+            ),
+        ]
+
+        results = validate_empic_no_release_without_accepted_delivery(events)
+        assert len(results) == 1
+        assert not results[0].passed
+
+    def test_invalid_delivery_not_paid_fails(self) -> None:
+        """Rejected delivery ids must not appear in release events."""
+        events = [
+            _empic(
+                {
+                    "event_type": "empic_delivery_evaluated",
+                    "delivery_id": "d1",
+                    "accepted": False,
+                }
+            ),
+            _empic(
+                {
+                    "event_type": "empic_escrow_released",
+                    "delivery_id": "d1",
+                    "amount": 10,
+                }
+            ),
+        ]
+
+        results = validate_empic_invalid_delivery_not_paid(events)
+        assert len(results) == 1
+        assert not results[0].passed
+
+    def test_no_drain_after_close_fails(self) -> None:
+        """Pubsub release after stream close is an attack."""
+        events = [
+            _empic(
+                {"event_type": "empic_stream_closed", "payment_ref": "s1", "mode": "pubsub"},
+                tick=2,
+            ),
+            _empic(
+                {
+                    "event_type": "empic_escrow_released",
+                    "payment_ref": "s1",
+                    "mode": "pubsub",
+                    "delivery_id": "d1",
+                    "amount": 10,
+                },
+                tick=3,
+            ),
+        ]
+
+        results = validate_empic_no_drain_after_close(events)
+        assert len(results) == 1
+        assert not results[0].passed
+
+    def test_no_overbill_on_partition_fails(self) -> None:
+        """Pubsub release after a dropped edge between parties is an attack."""
+        events = [
+            _empic(
+                {
+                    "event_type": "empic_stream_opened",
+                    "payment_ref": "s1",
+                    "payer": "consumer",
+                    "provider": "provider",
+                },
+                tick=0,
+            ),
+            {"kind": "dropped", "from": "provider", "agent": "consumer", "ts": 2.0},
+            _empic(
+                {
+                    "event_type": "empic_escrow_released",
+                    "payment_ref": "s1",
+                    "mode": "pubsub",
+                    "delivery_id": "d1",
+                    "amount": 10,
+                },
+                tick=3,
+            ),
+        ]
+
+        results = validate_empic_no_overbill_on_partition(events)
+        assert len(results) == 1
+        assert not results[0].passed
+
+
 class TestValidatorRegistry:
     def test_all_scenario_types_registered(self) -> None:
         expected = {
@@ -752,6 +912,7 @@ class TestValidatorRegistry:
             "identity_rotation",
             "memory_concurrent_writers",
             "streaming_payments",
+            "empic_payments",
             "comms_versioning",
             "receipt_reputation",
         }

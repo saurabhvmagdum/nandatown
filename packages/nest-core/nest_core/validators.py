@@ -1405,6 +1405,255 @@ def validate_streaming_no_overbill_on_partition(
 
 
 # ---------------------------------------------------------------------------
+# EMPIC escrow/streaming payments validators
+# ---------------------------------------------------------------------------
+
+
+def _event_tick(ev: dict[str, Any]) -> int:
+    raw = ev.get("tick", ev.get("ts", 0))
+    if isinstance(raw, bool):
+        return 0
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, float):
+        return int(raw)
+    if isinstance(raw, str):
+        with contextlib.suppress(ValueError):
+            return int(float(raw))
+    return 0
+
+
+def _empic_audit_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    parsed: list[dict[str, Any]] = []
+    for ev in events:
+        if ev.get("kind") != "send":
+            continue
+        msg = _message_body(ev)
+        with contextlib.suppress(json.JSONDecodeError):
+            body_raw: object = json.loads(msg)
+            if not isinstance(body_raw, dict):
+                continue
+            body = cast("dict[str, Any]", body_raw)
+            if body.get("type") == "empic_audit":
+                body.setdefault("tick", _event_tick(ev))
+                parsed.append(body)
+    return parsed
+
+
+def validate_empic_escrow_conservation(
+    events: list[dict[str, Any]],
+) -> list[ValidationResult]:
+    """Every escrowed credit is either released or refunded.
+
+    This checks the EMPIC shadow ledger from audit messages: consumer debits
+    into escrow must equal provider releases plus consumer refunds.
+    """
+    audit = _empic_audit_events(events)
+    debited = sum(
+        _safe_amount(ev.get("amount"))
+        for ev in audit
+        if ev.get("event_type") == "empic_escrow_debited"
+    )
+    released = sum(
+        _safe_amount(ev.get("amount"))
+        for ev in audit
+        if ev.get("event_type") == "empic_escrow_released"
+    )
+    refunded = sum(
+        _safe_amount(ev.get("amount"))
+        for ev in audit
+        if ev.get("event_type") == "empic_escrow_refunded"
+    )
+    if debited != released + refunded:
+        return [
+            ValidationResult(
+                "empic_escrow_conservation",
+                False,
+                f"debited={debited} released={released} refunded={refunded}",
+            )
+        ]
+    return [
+        ValidationResult(
+            "empic_escrow_conservation",
+            True,
+            f"debited={debited}, released={released}, refunded={refunded}",
+        )
+    ]
+
+
+def validate_empic_no_release_without_accepted_delivery(
+    events: list[dict[str, Any]],
+) -> list[ValidationResult]:
+    """Provider payment release requires accepted delivery evidence."""
+    audit = _empic_audit_events(events)
+    accepted_deliveries = {
+        str(ev.get("delivery_id"))
+        for ev in audit
+        if ev.get("event_type") == "empic_delivery_evaluated" and ev.get("accepted") is True
+    }
+    violations: list[str] = []
+    for ev in audit:
+        if ev.get("event_type") != "empic_escrow_released":
+            continue
+        delivery_id = str(ev.get("delivery_id", ""))
+        if not delivery_id or delivery_id not in accepted_deliveries:
+            violations.append(
+                f"release ref={ev.get('payment_ref')} delivery={delivery_id or '<missing>'}"
+            )
+
+    if violations:
+        return [
+            ValidationResult(
+                "empic_no_release_without_accepted_delivery",
+                False,
+                "; ".join(violations),
+            )
+        ]
+    return [
+        ValidationResult(
+            "empic_no_release_without_accepted_delivery",
+            True,
+            f"verified {len(accepted_deliveries)} accepted deliveries",
+        )
+    ]
+
+
+def validate_empic_invalid_delivery_not_paid(
+    events: list[dict[str, Any]],
+) -> list[ValidationResult]:
+    """Rejected delivery evidence must not be credited to a provider."""
+    audit = _empic_audit_events(events)
+    rejected = {
+        str(ev.get("delivery_id"))
+        for ev in audit
+        if ev.get("event_type") == "empic_delivery_evaluated" and ev.get("accepted") is False
+    }
+    paid = {
+        str(ev.get("delivery_id"))
+        for ev in audit
+        if ev.get("event_type") == "empic_escrow_released" and ev.get("delivery_id")
+    }
+    violations = sorted(rejected & paid)
+    if violations:
+        return [
+            ValidationResult(
+                "empic_invalid_delivery_not_paid",
+                False,
+                f"rejected deliveries were paid: {violations}",
+            )
+        ]
+    return [
+        ValidationResult(
+            "empic_invalid_delivery_not_paid",
+            True,
+            f"verified {len(rejected)} rejected deliveries",
+        )
+    ]
+
+
+def validate_empic_no_drain_after_close(
+    events: list[dict[str, Any]],
+) -> list[ValidationResult]:
+    """Pubsub streams must not release funds after close."""
+    audit = _empic_audit_events(events)
+    close_tick: dict[str, int] = {}
+    violations: list[str] = []
+
+    for ev in audit:
+        if ev.get("event_type") == "empic_stream_closed":
+            ref = str(ev.get("payment_ref", ""))
+            if ref:
+                close_tick[ref] = _event_tick(ev)
+
+    for ev in audit:
+        if ev.get("event_type") != "empic_escrow_released" or ev.get("mode") != "pubsub":
+            continue
+        ref = str(ev.get("payment_ref", ""))
+        closed_at = close_tick.get(ref)
+        if closed_at is not None and _event_tick(ev) > closed_at:
+            violations.append(f"{ref} released at {_event_tick(ev)} after close at {closed_at}")
+
+    if violations:
+        return [ValidationResult("empic_no_drain_after_close", False, "; ".join(violations))]
+    return [
+        ValidationResult(
+            "empic_no_drain_after_close",
+            True,
+            f"verified {len(close_tick)} closed pubsub streams",
+        )
+    ]
+
+
+def validate_empic_no_overbill_on_partition(
+    events: list[dict[str, Any]],
+) -> list[ValidationResult]:
+    """Pubsub streams must not release funds after a partitioned delivery edge."""
+    audit = _empic_audit_events(events)
+    stream_parties: dict[str, tuple[str, str]] = {}
+    partition_start: dict[tuple[str, str], int] = {}
+    violations: list[str] = []
+
+    for ev in audit:
+        if ev.get("event_type") == "empic_stream_opened":
+            ref = str(ev.get("payment_ref", ""))
+            payer = str(ev.get("payer", ""))
+            provider = str(ev.get("provider", ""))
+            if ref and payer and provider:
+                stream_parties[ref] = (payer, provider)
+
+    for ev in events:
+        if ev.get("kind") != "dropped":
+            continue
+        sender = str(ev.get("from", ""))
+        receiver = str(ev.get("agent", ""))
+        if not sender or not receiver:
+            continue
+        tick = _event_tick(ev)
+        for edge in ((sender, receiver), (receiver, sender)):
+            old = partition_start.get(edge)
+            if old is None or tick < old:
+                partition_start[edge] = tick
+
+    for ev in audit:
+        if ev.get("event_type") != "empic_escrow_released" or ev.get("mode") != "pubsub":
+            continue
+        ref = str(ev.get("payment_ref", ""))
+        parties = stream_parties.get(ref)
+        if parties is None:
+            continue
+        payer, provider = parties
+        drop_tick = partition_start.get((payer, provider))
+        if drop_tick is not None and _event_tick(ev) >= drop_tick:
+            violations.append(
+                f"{ref} released at {_event_tick(ev)} after {payer}<->{provider} "
+                f"partition at {drop_tick}"
+            )
+
+    if violations:
+        return [ValidationResult("empic_no_overbill_on_partition", False, "; ".join(violations))]
+    return [
+        ValidationResult(
+            "empic_no_overbill_on_partition",
+            True,
+            f"verified {len(stream_parties)} pubsub streams",
+        )
+    ]
+
+
+def _safe_amount(value: Any) -> int:
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        with contextlib.suppress(ValueError):
+            return int(value)
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Comms schema-versioning validators (adversarial)
 # ---------------------------------------------------------------------------
 
@@ -1884,6 +2133,13 @@ VALIDATORS: dict[str, list[Any]] = {
         validate_streaming_conservation,
         validate_streaming_no_drain_after_close,
         validate_streaming_no_overbill_on_partition,
+    ],
+    "empic_payments": [
+        validate_empic_escrow_conservation,
+        validate_empic_no_release_without_accepted_delivery,
+        validate_empic_invalid_delivery_not_paid,
+        validate_empic_no_drain_after_close,
+        validate_empic_no_overbill_on_partition,
     ],
     "receipt_reputation": [
         validate_receipt_reputation_ring_severed,
