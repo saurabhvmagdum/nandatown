@@ -1,0 +1,7 @@
+consensus:
+  quorum_fraction: 0.667
+  phase_timeout_sec: 5
+  max_rounds: 10
+  leader_rotation: round-robin
+  metrics_enabled: true
+  metrics_log_path: logs/consensus_metrics.jsonl
