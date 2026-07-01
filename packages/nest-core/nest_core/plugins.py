@@ -30,13 +30,17 @@ _BUILTINS: dict[tuple[str, str], str] = {
     ("payments", "prepaid_credits"): f"{_REF}.payments.prepaid_credits:PrepaidCredits",
     ("payments", "streaming"): f"{_REF}.payments.streaming:StreamingPayments",
     ("coordination", "contract_net"): f"{_REF}.coordination.contract_net:ContractNet",
+    ("coordination", "hotstuff"): f"{_REF}.coordination.hotstuff:HotStuff",
     ("negotiation", "alternating_offers"): (
         f"{_REF}.negotiation.alternating_offers:AlternatingOffers"
     ),
+    ("negotiation", "pareto"): f"{_REF}.negotiation.pareto:ParetoNegotiation",
     ("memory", "blackboard"): f"{_REF}.memory.blackboard:Blackboard",
     ("memory", "lww_register"): f"{_REF}.memory.lww_register:LwwRegisterMemory",
     ("privacy", "noop"): f"{_REF}.privacy.noop:NoopPrivacy",
+    ("privacy", "hybrid_x25519"): f"{_REF}.privacy.hybrid_x25519:HybridX25519Privacy",
     ("datafacts", "datafacts_v1"): f"{_REF}.datafacts.datafacts_v1:DataFactsV1",
+    ("datafacts", "cid_facts"): f"{_REF}.datafacts.cid_facts:CidFacts",
     ("failure_detector", "heartbeat"): (
         f"{_REF}.failure_detection.heartbeat:HeartbeatFailureDetector"
     ),

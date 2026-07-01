@@ -1835,6 +1835,696 @@ def validate_receipt_reputation_honest_confidence(
 
 
 # ---------------------------------------------------------------------------
+# Multi-attribute negotiation (Pareto) validators
+# ---------------------------------------------------------------------------
+
+# Float-noise tolerance for the dominance relation. ">=" is read as ">= -eps"
+# and ">" as "> +eps", so reconstruction rounding (utilities are rebuilt from
+# the 6-dp weights in the trace) never fabricates or hides a violation.
+_PARETO_EPS = 1e-9
+
+
+class _AgentUtility:
+    """One agent's additive multi-attribute utility, reconstructed from the trace.
+
+    Reproduces the plugin's scoring *verbatim* (Keeney & Raiffa additive MAUT):
+    inputs are clamped into the feasible ranges, then each issue's normalized
+    value function is weighted and summed. The directional convention matches
+    the plugin exactly (the buyer values low price / short deadline, the seller
+    high price / long deadline) so a bundle scores identically here and inside
+    ``ParetoNegotiation``.
+
+    Example::
+
+        u = _AgentUtility("buyer", 0.9, 0.1, 50, 150, 1, 30, 0.0)
+        u.utility(50, 1)  # 1.0
+    """
+
+    def __init__(
+        self,
+        side: str,
+        w_price: float,
+        w_deadline: float,
+        plo: int,
+        phi: int,
+        dlo: int,
+        dhi: int,
+        reservation: float,
+    ) -> None:
+        self.side = side
+        self.w_price = w_price
+        self.w_deadline = w_deadline
+        self.plo = plo
+        self.phi = phi
+        self.dlo = dlo
+        self.dhi = dhi
+        self.reservation = reservation
+
+    def utility(self, price: int, deadline: int) -> float:
+        """Return this agent's utility for a (price, deadline) bundle."""
+        p = max(self.plo, min(self.phi, price))
+        d = max(self.dlo, min(self.dhi, deadline))
+        if self.side == "buyer":
+            f_price = (self.phi - p) / (self.phi - self.plo)
+            f_deadline = (self.dhi - d) / (self.dhi - self.dlo)
+        else:
+            f_price = (p - self.plo) / (self.phi - self.plo)
+            f_deadline = (d - self.dlo) / (self.dhi - self.dlo)
+        return self.w_price * f_price + self.w_deadline * f_deadline
+
+
+class _MarketSession:
+    """Everything a single negotiation session contributed to the trace.
+
+    ``bundles`` is the set of every (price, deadline) exchanged in the session,
+    the trace-observed evidence the dominance frontier is computed from.
+    ``buyer``/``seller`` are resolved from the ``side`` tag on the offers.
+
+    Example::
+
+        sess = _MarketSession()
+        sess.bundles.add((55, 30))
+    """
+
+    def __init__(self) -> None:
+        self.bundles: set[tuple[int, int]] = set()
+        self.buyer: str | None = None
+        self.seller: str | None = None
+        self.agreement: tuple[int, int, str] | None = None
+        self.breakdown: bool = False
+
+
+def _collect_agent_utilities(events: list[dict[str, Any]]) -> dict[str, _AgentUtility]:
+    """Parse ``mautil:`` frames into per-agent utility reconstructors.
+
+    Frames are ``mautil:<agent>:<side>:<w_price>:<w_deadline>:<plo>:<phi>:<dlo>:
+    <dhi>:<reservation>``. Malformed frames (short split, non-numeric fields,
+    unknown side, or a degenerate range that would divide by zero) are skipped.
+
+    Example::
+
+        utils = _collect_agent_utilities(events)
+    """
+    utils: dict[str, _AgentUtility] = {}
+    for ev in events:
+        if ev.get("kind") != "send":
+            continue
+        msg = _message_body(ev)
+        if not msg.startswith("mautil:"):
+            continue
+        parts = msg.split(":")
+        if len(parts) < 10:
+            continue
+        agent, side = parts[1], parts[2]
+        if side not in ("buyer", "seller"):
+            continue
+        try:
+            w_price = float(parts[3])
+            w_deadline = float(parts[4])
+            plo, phi, dlo, dhi = int(parts[5]), int(parts[6]), int(parts[7]), int(parts[8])
+            reservation = float(parts[9])
+        except ValueError:
+            continue
+        if phi <= plo or dhi <= dlo:
+            continue
+        utils[agent] = _AgentUtility(side, w_price, w_deadline, plo, phi, dlo, dhi, reservation)
+    return utils
+
+
+def _collect_market_sessions(events: list[dict[str, Any]]) -> dict[str, _MarketSession]:
+    """Group ``offer:``/``agree:``/``breakdown:`` frames by session id.
+
+    Example::
+
+        sessions = _collect_market_sessions(events)
+    """
+    sessions: dict[str, _MarketSession] = defaultdict(_MarketSession)
+    for ev in events:
+        if ev.get("kind") != "send":
+            continue
+        msg = _message_body(ev)
+        parts = msg.split(":")
+        if msg.startswith("offer:") and len(parts) >= 7:
+            sid, agent, side = parts[1], parts[2], parts[3]
+            try:
+                price, deadline = int(parts[5]), int(parts[6])
+            except ValueError:
+                continue
+            sess = sessions[sid]
+            sess.bundles.add((price, deadline))
+            if side == "buyer":
+                sess.buyer = agent
+            elif side == "seller":
+                sess.seller = agent
+        elif msg.startswith("agree:") and len(parts) >= 5:
+            sid, accepting = parts[1], parts[4]
+            try:
+                price, deadline = int(parts[2]), int(parts[3])
+            except ValueError:
+                continue
+            sess = sessions[sid]
+            sess.agreement = (price, deadline, accepting)
+            sess.bundles.add((price, deadline))
+        elif msg.startswith("breakdown:") and len(parts) >= 3:
+            sessions[parts[1]].breakdown = True
+    return dict(sessions)
+
+
+def _pareto_dominates(ub_x: float, us_x: float, ub_y: float, us_y: float) -> bool:
+    """Return whether bundle X Pareto-dominates bundle Y (Zlotkin & Rosenschein Eq.4).
+
+    X dominates Y iff X is no worse for *either* party and strictly better for at
+    least one (Zlotkin & Rosenschein 1996; Royal Holloway negotiation notes,
+    Eq. 4). The ``>=`` comparisons are relaxed by ``_PARETO_EPS`` and the ``>``
+    comparisons tightened by it, so float reconstruction noise cannot manufacture
+    or mask a violation.
+
+    Example::
+
+        assert _pareto_dominates(0.9, 0.9, 0.9, 0.8)
+    """
+    no_worse = ub_x >= ub_y - _PARETO_EPS and us_x >= us_y - _PARETO_EPS
+    strictly_better = ub_x > ub_y + _PARETO_EPS or us_x > us_y + _PARETO_EPS
+    return no_worse and strictly_better
+
+
+def validate_multi_attribute_pareto_optimal(
+    events: list[dict[str, Any]],
+) -> list[ValidationResult]:
+    """No concluded agreement is Pareto-dominated by another bundle it exchanged.
+
+    For every session that reached an ``agree:`` outcome, this reconstructs both
+    parties' utilities (from their ``mautil:`` frames) and FAILS if any *other*
+    bundle exchanged in the same session dominates the agreement under
+    :func:`_pareto_dominates`. A ``breakdown:`` session is **not** a failure: a
+    bilateral negotiation can legitimately reach no deal.
+
+    Scope is deliberately *trace-evidence-bounded*: the frontier is computed from
+    the bundles actually observed on the wire, never from the full feasible grid.
+    An agreement this validator passes could in principle still be dominated by a
+    feasible bundle that was never offered, consistent with Nanda Town's rule
+    that validators judge trace evidence, not theorems. The adversarial power is
+    real nonetheless: the reference ``alternating_offers`` plugin never reads
+    ``conditions['deadline_days']``, so it accepts (or holds out for) a
+    price-acceptable bundle while a same-or-better-price, longer-deadline bundle
+    sits in the very same exchange, a bundle that dominates the agreement and
+    trips this check. ``ParetoNegotiation`` passes because its trade-off
+    counteroffers move along the iso-utility curve toward the opponent's revealed
+    preference, settling on a non-dominated logroll.
+
+    Guards against a vacuous pass: if no agreement was scorable, it FAILS with
+    ``"scenario exercised no negotiation"`` (mirrors the receipt-reputation guard).
+
+    Example::
+
+        results = validate_multi_attribute_pareto_optimal(events)
+    """
+    utils = _collect_agent_utilities(events)
+    sessions = _collect_market_sessions(events)
+
+    scored = 0
+    violations: list[str] = []
+    for sid in sorted(sessions):
+        sess = sessions[sid]
+        if sess.agreement is None or sess.buyer is None or sess.seller is None:
+            continue
+        buyer_u = utils.get(sess.buyer)
+        seller_u = utils.get(sess.seller)
+        if buyer_u is None or seller_u is None:
+            continue
+
+        scored += 1
+        a_price, a_deadline, _accepting = sess.agreement
+        ub_star = buyer_u.utility(a_price, a_deadline)
+        us_star = seller_u.utility(a_price, a_deadline)
+
+        for xp, xd in sorted(sess.bundles):
+            if (xp, xd) == (a_price, a_deadline):
+                continue
+            ub_x = buyer_u.utility(xp, xd)
+            us_x = seller_u.utility(xp, xd)
+            if _pareto_dominates(ub_x, us_x, ub_star, us_star):
+                violations.append(
+                    f"session {sid}: agreement ({a_price},{a_deadline}) "
+                    f"u_buyer={ub_star:.6f} u_seller={us_star:.6f} dominated by "
+                    f"({xp},{xd}) u_buyer={ub_x:.6f} u_seller={us_x:.6f}"
+                )
+                break
+
+    if scored == 0:
+        return [
+            ValidationResult(
+                "multi_attribute_pareto_optimal",
+                False,
+                "scenario exercised no negotiation",
+            )
+        ]
+    if violations:
+        return [ValidationResult("multi_attribute_pareto_optimal", False, "; ".join(violations))]
+    return [
+        ValidationResult(
+            "multi_attribute_pareto_optimal",
+            True,
+            f"{scored} agreement(s) non-dominated by any exchanged bundle",
+        )
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Provenance supply-chain validators
+# ---------------------------------------------------------------------------
+
+
+def _provenance_field_msg(events: list[dict[str, Any]], prefix: str) -> list[list[str]]:
+    """Collect ``|``-delimited fields from every send carrying ``prefix``.
+
+    The ``provenance_supply_chain`` scenario uses ``|`` (not ``:``) as its
+    field delimiter, since its payloads are ``df://sha256-<hex>`` URLs that
+    already contain a colon.
+
+    Example::
+
+        rows = _provenance_field_msg(events, "chain_ok|")
+    """
+    rows: list[list[str]] = []
+    for ev in events:
+        if ev.get("kind") != "send":
+            continue
+        msg = str(ev.get("msg", ""))
+        if msg.startswith(prefix):
+            rows.append(msg.split("|"))
+    return rows
+
+
+def validate_provenance_chain_integrity(
+    events: list[dict[str, Any]],
+) -> list[ValidationResult]:
+    """The verifier walks the full parent chain back to the source without a break.
+
+    Example::
+
+        results = validate_provenance_chain_integrity(events)
+    """
+    broken = _provenance_field_msg(events, "chain_broken|")
+    if broken:
+        detail = "; ".join(f"{row[1]} could not resolve parent {row[2]}" for row in broken)
+        return [ValidationResult("provenance_chain_integrity", False, detail)]
+    ok = _provenance_field_msg(events, "chain_ok|")
+    if not ok:
+        return [ValidationResult("provenance_chain_integrity", False, "no chain_ok recorded")]
+    depth = ok[0][2]
+    return [
+        ValidationResult(
+            "provenance_chain_integrity",
+            True,
+            f"chain resolved to depth {depth}",
+        )
+    ]
+
+
+def validate_multi_attribute_individually_rational(
+    events: list[dict[str, Any]],
+) -> list[ValidationResult]:
+    """Every agreement clears both parties' reservation utility.
+
+    Reconstructs each party's utility for the agreed bundle and FAILS if either
+    falls below its declared reservation (within ``_PARETO_EPS``). This catches a
+    degenerate "agree to anything" plugin that closes a deal one side strictly
+    prefers to walk away from. Like the Pareto check it guards against a vacuous
+    pass: if no agreement was scorable it FAILS with
+    ``"scenario exercised no negotiation"``.
+
+    Example::
+
+        results = validate_multi_attribute_individually_rational(events)
+    """
+    utils = _collect_agent_utilities(events)
+    sessions = _collect_market_sessions(events)
+
+    scored = 0
+    offenders: list[str] = []
+    for sid in sorted(sessions):
+        sess = sessions[sid]
+        if sess.agreement is None or sess.buyer is None or sess.seller is None:
+            continue
+        buyer_u = utils.get(sess.buyer)
+        seller_u = utils.get(sess.seller)
+        if buyer_u is None or seller_u is None:
+            continue
+
+        scored += 1
+        a_price, a_deadline, _accepting = sess.agreement
+        ub = buyer_u.utility(a_price, a_deadline)
+        us = seller_u.utility(a_price, a_deadline)
+        if ub < buyer_u.reservation - _PARETO_EPS:
+            offenders.append(
+                f"session {sid}: buyer u={ub:.6f} < reservation {buyer_u.reservation:.6f}"
+            )
+        if us < seller_u.reservation - _PARETO_EPS:
+            offenders.append(
+                f"session {sid}: seller u={us:.6f} < reservation {seller_u.reservation:.6f}"
+            )
+
+    if scored == 0:
+        return [
+            ValidationResult(
+                "multi_attribute_individually_rational",
+                False,
+                "scenario exercised no negotiation",
+            )
+        ]
+    if offenders:
+        return [
+            ValidationResult("multi_attribute_individually_rational", False, "; ".join(offenders))
+        ]
+    return [
+        ValidationResult(
+            "multi_attribute_individually_rational",
+            True,
+            f"{scored} agreement(s) individually rational for both parties",
+        )
+    ]
+
+
+def validate_provenance_substitution_resistant(
+    events: list[dict[str, Any]],
+) -> list[ValidationResult]:
+    """An outsider republishing different content must not land on the source's URL.
+
+    Catches the *substitution* attack: a name-addressed registry
+    (``datafacts_v1``) lets anyone overwrite ``df://<name>`` with new bytes;
+    a content-addressed one (``cid_facts``) cannot alias two different
+    contents onto the same URL.
+
+    Example::
+
+        results = validate_provenance_substitution_resistant(events)
+    """
+    rows = _provenance_field_msg(events, "attack_substitution|")
+    if not rows:
+        return [ValidationResult("provenance_substitution_resistant", False, "no attack recorded")]
+    source_url, attacker_url, collided = rows[0][1], rows[0][2], rows[0][3]
+    if collided != "0":
+        return [
+            ValidationResult(
+                "provenance_substitution_resistant",
+                False,
+                f"attacker's republish landed on the source URL {source_url} "
+                f"(attacker url {attacker_url})",
+            )
+        ]
+    return [
+        ValidationResult(
+            "provenance_substitution_resistant",
+            True,
+            f"attacker's differing content resolved to a distinct URL ({attacker_url})",
+        )
+    ]
+
+
+def validate_provenance_freshness_unforgeable(
+    events: list[dict[str, Any]],
+) -> list[ValidationResult]:
+    """A freshness claim signed by someone other than the owner must be rejected.
+
+    Catches the *stale-claim* attack: an unauthenticated wall-clock check
+    (``datafacts_v1``) treats any recent republish as proof of freshness,
+    regardless of who did it; a signature-backed check (``cid_facts``) only
+    accepts a proof whose signer is the dataset's declared owner.
+
+    Example::
+
+        results = validate_provenance_freshness_unforgeable(events)
+    """
+    rows = _provenance_field_msg(events, "attack_forged_freshness|")
+    if not rows:
+        return [ValidationResult("provenance_freshness_unforgeable", False, "no attack recorded")]
+    url, fresh = rows[0][1], rows[0][2]
+    if fresh != "0":
+        return [
+            ValidationResult(
+                "provenance_freshness_unforgeable",
+                False,
+                f"forged freshness claim for {url} was accepted",
+            )
+        ]
+    return [
+        ValidationResult(
+            "provenance_freshness_unforgeable",
+            True,
+            f"forged freshness claim for {url} was correctly rejected",
+        )
+    ]
+
+
+def validate_provenance_chain_unforgeable(
+    events: list[dict[str, Any]],
+) -> list[ValidationResult]:
+    """A dataset declaring a never-published parent must be rejected at publish time.
+
+    Catches *provenance washing*: a registry with no lineage concept
+    (``datafacts_v1``) accepts a "derived" dataset whose claimed parent does
+    not exist anywhere in the trace; ``cid_facts`` refuses to publish it.
+
+    Example::
+
+        results = validate_provenance_chain_unforgeable(events)
+    """
+    rows = _provenance_field_msg(events, "attack_provenance|")
+    if not rows:
+        return [ValidationResult("provenance_chain_unforgeable", False, "no attack recorded")]
+    phantom_parent, rejected = rows[0][1], rows[0][2]
+    if rejected != "1":
+        return [
+            ValidationResult(
+                "provenance_chain_unforgeable",
+                False,
+                f"publish with phantom parent {phantom_parent} was not rejected",
+            )
+        ]
+    return [
+        ValidationResult(
+            "provenance_chain_unforgeable",
+            True,
+            f"publish with phantom parent {phantom_parent} was correctly rejected",
+        )
+    ]
+
+
+# ---------------------------------------------------------------------------
+# BFT HotStuff validators
+# ---------------------------------------------------------------------------
+
+_STUCK_VIEW_K_TICKS = 300
+
+
+def validate_bft_no_conflicting_commits(
+    events: list[dict[str, Any]],
+) -> list[ValidationResult]:
+    """No two honest replicas commit conflicting values for the same view.
+
+    Reads ``result:<view>:committed:<accepts>/<total>:<block_hash>:<value>``
+    lines, each announced independently by the replica that observed the
+    commit QC (not just the leader's say-so). Conflicts are keyed on
+    ``block_hash`` -- the field that comes straight from the commit QC and
+    is therefore identical across every honest replica for a given view --
+    rather than ``value``, since a replica that only saw the commit QC (not
+    the original PREPARE, e.g. after being partitioned away) may not know
+    the plaintext value but still agrees on the hash. A trace with zero
+    commits is itself a failure -- it means no quorum-backed progress was
+    ever observed, which is also why this validator FAILS against a
+    ``contract_net``-coordinated trace (no ``result:...committed`` lines
+    exist at all).
+
+    Example::
+
+        results = validate_bft_no_conflicting_commits(events)
+    """
+    commits_by_view: dict[str, dict[str, str]] = defaultdict(dict)
+    for ev in events:
+        if ev.get("kind") != "send":
+            continue
+        msg = _message_body(ev)
+        if not msg.startswith("result:"):
+            continue
+        parts = msg.split(":")
+        if len(parts) < 6 or parts[2] != "committed":
+            continue
+        view, block_hash_hex = parts[1], parts[4]
+        commits_by_view[view][str(ev.get("agent", ""))] = block_hash_hex
+
+    if not commits_by_view:
+        return [
+            ValidationResult("bft_no_conflicting_commits", False, "no commits observed in trace")
+        ]
+
+    violations: list[str] = []
+    for view, by_agent in commits_by_view.items():
+        distinct = set(by_agent.values())
+        if len(distinct) > 1:
+            violations.append(f"view {view}: conflicting commits {by_agent}")
+
+    if violations:
+        return [ValidationResult("bft_no_conflicting_commits", False, "; ".join(violations))]
+    return [
+        ValidationResult(
+            "bft_no_conflicting_commits",
+            True,
+            f"checked {len(commits_by_view)} committed view(s), no conflicts",
+        )
+    ]
+
+
+def validate_bft_no_equivocation(
+    events: list[dict[str, Any]],
+) -> list[ValidationResult]:
+    """No leader sends two different PREPARE proposals in the same view.
+
+    Reads ``prepare:<view>:<block_hash>:<value>:<justify_qc>`` lines, grouped
+    by ``(sender, view)``. More than one distinct ``block_hash`` from the
+    same sender in the same view means that leader equivocated.
+
+    Example::
+
+        results = validate_bft_no_equivocation(events)
+    """
+    hashes_by_leader_view: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for ev in events:
+        if ev.get("kind") != "send":
+            continue
+        msg = _message_body(ev)
+        if not msg.startswith("prepare:"):
+            continue
+        parts = msg.split(":", 4)
+        if len(parts) < 3:
+            continue
+        view, block_hash_hex = parts[1], parts[2]
+        key = (str(ev.get("agent", "")), view)
+        hashes_by_leader_view[key].add(block_hash_hex)
+
+    violations = [
+        f"leader {leader} view {view}: sent conflicting proposals {hashes}"
+        for (leader, view), hashes in hashes_by_leader_view.items()
+        if len(hashes) > 1
+    ]
+
+    if violations:
+        return [ValidationResult("bft_no_equivocation", False, "; ".join(violations))]
+    return [
+        ValidationResult(
+            "bft_no_equivocation",
+            True,
+            f"checked {len(hashes_by_leader_view)} (leader, view) proposal(s), no equivocation",
+        )
+    ]
+
+
+def validate_bft_forged_quorum(
+    events: list[dict[str, Any]],
+) -> list[ValidationResult]:
+    """Every broadcast commit QC is backed by >= 2f+1 distinct signers.
+
+    Reads ``qc:<phase>:<view>:<block_hash>:<f>:<voter1>=<sig1>,...`` lines.
+    Distinct voter tokens are counted after deduplication, so padding the
+    same signer twice to inflate the count is itself caught as a forgery.
+
+    Example::
+
+        results = validate_bft_forged_quorum(events)
+    """
+    violations: list[str] = []
+    checked = 0
+    for ev in events:
+        if ev.get("kind") != "send":
+            continue
+        msg = _message_body(ev)
+        if not msg.startswith("qc:"):
+            continue
+        parts = msg.split(":", 5)
+        if len(parts) != 6:
+            continue
+        phase, view, block_hash_hex, f_str, votes_str = (
+            parts[1],
+            parts[2],
+            parts[3],
+            parts[4],
+            parts[5],
+        )
+        try:
+            f_value = int(f_str)
+        except ValueError:
+            continue
+        required = 2 * f_value + 1
+        voters = {entry.partition("=")[0] for entry in votes_str.split(",") if entry}
+        checked += 1
+        if len(voters) < required:
+            violations.append(
+                f"{phase} qc view {view} block {block_hash_hex}: "
+                f"{len(voters)} distinct signers, needed {required}"
+            )
+
+    if violations:
+        return [ValidationResult("bft_forged_quorum", False, "; ".join(violations))]
+    return [
+        ValidationResult(
+            "bft_forged_quorum",
+            True,
+            f"checked {checked} broadcast QC(s), all backed by a real quorum",
+        )
+    ]
+
+
+def validate_bft_no_stuck_view(
+    events: list[dict[str, Any]],
+) -> list[ValidationResult]:
+    """Commit progress resumes within K ticks of the network healing.
+
+    Baseline is the simulator's ``partition_healed`` marker if present,
+    else ``ts=0`` (so the same validator also covers the byzantine scenario,
+    which has no partition). Fails if no ``result:...committed`` line
+    appears within ``_STUCK_VIEW_K_TICKS`` ticks after the baseline.
+
+    Example::
+
+        results = validate_bft_no_stuck_view(events)
+    """
+    baseline = 0.0
+    for ev in events:
+        if ev.get("kind") == "partition_healed":
+            baseline = float(ev.get("ts", 0.0))
+            break
+
+    commit_ticks: list[float] = []
+    for ev in events:
+        if ev.get("kind") != "send":
+            continue
+        msg = _message_body(ev)
+        if msg.startswith("result:") and ":committed:" in msg:
+            commit_ticks.append(float(ev.get("ts", 0.0)))
+
+    if not commit_ticks:
+        return [ValidationResult("bft_no_stuck_view", False, "no commits observed in trace")]
+
+    window_end = baseline + _STUCK_VIEW_K_TICKS
+    in_window = [t for t in commit_ticks if baseline <= t <= window_end]
+    if not in_window:
+        return [
+            ValidationResult(
+                "bft_no_stuck_view",
+                False,
+                f"no commit within {_STUCK_VIEW_K_TICKS} ticks of baseline ts={baseline}",
+            )
+        ]
+    return [
+        ValidationResult(
+            "bft_no_stuck_view",
+            True,
+            f"commit progress resumed at ts={min(in_window)} (baseline ts={baseline})",
+        )
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Failure-detection validators
 # ---------------------------------------------------------------------------
 
@@ -2198,6 +2888,22 @@ VALIDATORS: dict[str, list[Any]] = {
     "receipt_reputation": [
         validate_receipt_reputation_ring_severed,
         validate_receipt_reputation_honest_confidence,
+    ],
+    "multi_attribute_market": [
+        validate_multi_attribute_pareto_optimal,
+        validate_multi_attribute_individually_rational,
+    ],
+    "provenance_supply_chain": [
+        validate_provenance_chain_integrity,
+        validate_provenance_substitution_resistant,
+        validate_provenance_freshness_unforgeable,
+        validate_provenance_chain_unforgeable,
+    ],
+    "bft_hotstuff": [
+        validate_bft_no_conflicting_commits,
+        validate_bft_no_equivocation,
+        validate_bft_forged_quorum,
+        validate_bft_no_stuck_view,
     ],
     "failure_detection": [
         validate_failure_detection_completeness,

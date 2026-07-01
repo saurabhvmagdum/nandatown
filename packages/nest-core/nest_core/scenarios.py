@@ -97,6 +97,22 @@ def _try_load_builtin(name: str) -> None:
         )
 
         register_scenario("receipt_reputation", receipt_reputation_factory)
+    elif name == "multi_attribute_market":
+        from nest_core.scenarios_builtin.multi_attribute_market import (
+            multi_attribute_market_factory,
+        )
+
+        register_scenario("multi_attribute_market", multi_attribute_market_factory)
+    elif name == "provenance_supply_chain":
+        from nest_core.scenarios_builtin.provenance_supply_chain import (
+            provenance_supply_chain_factory,
+        )
+
+        register_scenario("provenance_supply_chain", provenance_supply_chain_factory)
+    elif name == "bft_hotstuff":
+        from nest_core.scenarios_builtin.bft_hotstuff import bft_hotstuff_factory
+
+        register_scenario("bft_hotstuff", bft_hotstuff_factory)
     elif name == "failure_detection":
         from nest_core.scenarios_builtin.failure_detection import (
             failure_detection_factory,
