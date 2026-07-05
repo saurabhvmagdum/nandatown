@@ -84,10 +84,14 @@ with a typed reason).
 
 Every other trust plugin scores what agents **did**. `aae_permit_gate`
 decides what an agent **may do**, before it does it — and signs the
-decision either way. A well-reputed agent attempting an unauthorized
-action sails through every post-hoc reputation layer; this one stops it,
-and the stop is not a silent absence but a signed, verifiable denial
-receipt.
+verdict either way. A well-reputed agent attempting an unauthorized
+action sails through every post-hoc reputation layer on its record
+alone; this gate answers the request before it runs, and a refusal it
+returns is a signed, first-class receipt — provable from the envelope
+chain by anyone, not a silent absence. The refusal does not consult
+reputation, so no amount of prior good standing outranks it; the
+`rogue_trusted_agent` scenario below turns that returned verdict into a
+blocked action and proves it.
 
 Source:
 [`trust/aae_permit_gate.py`](../../packages/nest-plugins-reference/nest_plugins_reference/trust/aae_permit_gate.py)
