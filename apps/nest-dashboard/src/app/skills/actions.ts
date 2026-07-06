@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { createSkill, type SkillSourceType } from "@/lib/skills";
 import { initialSubmitState, type SubmitState } from "./form-state";
 
@@ -15,6 +16,21 @@ function isValidHttpUrl(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+function isValidEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+/**
+ * Best-effort client IP from the proxy headers Railway sets. Falls back to
+ * null when we can't tell (e.g. local dev without a proxy).
+ */
+async function clientIp(): Promise<string | null> {
+  const h = await headers();
+  const forwarded = h.get("x-forwarded-for");
+  if (forwarded) return forwarded.split(",")[0].trim() || null;
+  return h.get("x-real-ip");
 }
 
 /**
@@ -43,6 +59,7 @@ export async function submitSkill(
 ): Promise<SubmitState> {
   const name = str(formData.get("name"));
   const author = str(formData.get("author"));
+  const email = str(formData.get("email"));
   const description = str(formData.get("description"));
   const endpoints = str(formData.get("endpoints"));
   const tags = str(formData.get("tags"));
@@ -53,6 +70,9 @@ export async function submitSkill(
   // --- Validation ---------------------------------------------------------
   if (!name) {
     return { ...initialSubmitState, error: "Give your SkillMD a name." };
+  }
+  if (email && !isValidEmail(email)) {
+    return { ...initialSubmitState, error: "That email doesn't look right." };
   }
   if (!["url", "github", "content"].includes(sourceType)) {
     return { ...initialSubmitState, error: "Pick how you want to submit it." };
@@ -78,6 +98,7 @@ export async function submitSkill(
 
   // --- Save ---------------------------------------------------------------
   try {
+    const submitterIp = await clientIp();
     const skill = await createSkill({
       name,
       author: author || null,
@@ -88,6 +109,8 @@ export async function submitSkill(
       endpoints: endpoints || null,
       tags: tags || null,
       reachable,
+      email: email || null,
+      submitter_ip: submitterIp,
     });
     revalidatePath("/skills");
     return { ok: true, error: null, createdId: skill.id, createdName: skill.name };

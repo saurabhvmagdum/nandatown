@@ -64,6 +64,24 @@ export function SubmitForm() {
         </div>
       </div>
 
+      {/* Email (private) */}
+      <div>
+        <label htmlFor="email" className={labelClass}>
+          Email
+        </label>
+        <input
+          id="email"
+          name="email"
+          type="email"
+          placeholder="you@example.com"
+          className={inputClass}
+        />
+        <p className="mt-2 text-[0.82rem] text-ink-400">
+          Private — only the Nanda Town team sees it. Never shown on the site or
+          in the public API.
+        </p>
+      </div>
+
       {/* Description */}
       <div>
         <label htmlFor="description" className={labelClass}>

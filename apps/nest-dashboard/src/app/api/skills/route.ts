@@ -36,6 +36,11 @@ export async function POST(request: NextRequest) {
   const sourceType = s(body.source_type) as SkillSourceType;
   const sourceUrl = s(body.source_url);
   const content = typeof body.content === "string" ? body.content : "";
+  const email = s(body.email);
+  const forwarded = request.headers.get("x-forwarded-for");
+  const submitterIp = forwarded
+    ? forwarded.split(",")[0].trim() || null
+    : request.headers.get("x-real-ip");
 
   if (!name) {
     return Response.json({ error: "name is required" }, { status: 400 });
@@ -70,6 +75,8 @@ export async function POST(request: NextRequest) {
       endpoints: s(body.endpoints) || null,
       tags: s(body.tags) || null,
       reachable: null,
+      email: email || null,
+      submitter_ip: submitterIp,
     });
     return Response.json({ skill }, { status: 201 });
   } catch (err) {
