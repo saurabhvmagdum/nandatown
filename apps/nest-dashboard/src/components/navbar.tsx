@@ -51,13 +51,84 @@ const items: NavItem[] = [
   { href: "/docs", label: "Docs" },
 ];
 
+function NavList({
+  pathname,
+  onNavigate,
+}: {
+  pathname: string;
+  onNavigate?: () => void;
+}) {
+  const linkCls = (active: boolean) =>
+    `block rounded-md px-3 py-2 text-[0.92rem] font-medium transition-colors ${
+      active ? "bg-cream-200 text-ink-900" : "text-ink-400 hover:bg-cream-200/60 hover:text-ink-900"
+    }`;
+
+  return (
+    <ul className="space-y-0.5">
+      {items.map((item) => {
+        const active =
+          !item.external &&
+          (pathname === item.href || pathname.startsWith(item.href + "/"));
+        return (
+          <li key={item.label}>
+            {item.external ? (
+              <a href={item.href} className={linkCls(false)} onClick={onNavigate}>
+                {item.label}
+              </a>
+            ) : (
+              <Link href={item.href} className={linkCls(active)} onClick={onNavigate}>
+                {item.label}
+              </Link>
+            )}
+            {item.children && (
+              <ul className="mt-0.5 mb-1.5 ml-4 space-y-0.5 border-l border-cream-400/60 pl-2">
+                {item.children.map((child) => {
+                  const childActive = pathname.startsWith(child.href);
+                  const childCls = `block rounded-md px-3 py-1.5 text-[0.85rem] font-medium transition-colors ${
+                    childActive ? "bg-cream-200 text-ink-900" : "text-ink-400 hover:bg-cream-200/60 hover:text-ink-900"
+                  }`;
+                  return (
+                    <li key={child.href}>
+                      {child.href.startsWith("http") ? (
+                        <a
+                          href={child.href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className={childCls}
+                          onClick={onNavigate}
+                        >
+                          {child.label}
+                        </a>
+                      ) : (
+                        <Link href={child.href} className={childCls} onClick={onNavigate}>
+                          {child.label}
+                        </Link>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 export function Navbar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
     if (localStorage.getItem("nt-sidebar-collapsed") === "1") setCollapsed(true);
   }, []);
+
+  // Close the mobile drawer whenever the route changes.
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
 
   function toggle() {
     setCollapsed((c) => {
@@ -66,22 +137,45 @@ export function Navbar() {
     });
   }
 
-  const linkCls = (active: boolean) =>
-    `block rounded-md px-3 py-2 text-[0.92rem] font-medium transition-colors ${
-      active ? "bg-cream-200 text-ink-900" : "text-ink-400 hover:bg-cream-200/60 hover:text-ink-900"
-    }`;
-
   const toggleBtnCls =
-    "flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-cream-400/60 text-[13px] leading-none text-ink-400 transition-colors hover:bg-cream-200/60 hover:text-ink-900";
+    "flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-cream-400/60 text-[15px] leading-none text-ink-400 transition-colors hover:bg-cream-200/60 hover:text-ink-900";
 
   return (
     <>
-      {/* Slim top bar, mobile only */}
-      <div className="sticky top-0 z-50 flex h-14 items-center border-b border-cream-400/60 bg-cream-100/85 px-5 backdrop-blur-xl md:hidden">
-        <Link href="/" className="flex items-center gap-2.5" aria-label="Nanda Town — home">
-          <Image src="/brand/nandatown-logo.png" alt="" width={28} height={28} className="h-7 w-7 object-contain" />
-          <span className="font-display text-[1.15rem] leading-none tracking-tight text-ink-900">Nanda Town</span>
-        </Link>
+      {/* Slim top bar with menu button, mobile only */}
+      <div className="sticky top-0 z-50 md:hidden">
+        <div className="flex h-14 items-center justify-between border-b border-cream-400/60 bg-cream-100/85 px-5 backdrop-blur-xl">
+          <Link href="/" className="flex items-center gap-2.5" aria-label="Nanda Town — home">
+            <Image src="/brand/nandatown-logo.png" alt="" width={28} height={28} className="h-7 w-7 object-contain" />
+            <span className="font-display text-[1.15rem] leading-none tracking-tight text-ink-900">Nanda Town</span>
+          </Link>
+          <button
+            type="button"
+            onClick={() => setMobileOpen((o) => !o)}
+            className={toggleBtnCls}
+            aria-label={mobileOpen ? "Close menu" : "Open menu"}
+            aria-expanded={mobileOpen}
+          >
+            {mobileOpen ? "✕" : "☰"}
+          </button>
+        </div>
+
+        {/* Slide-down menu anchored under the bar */}
+        {mobileOpen && (
+          <div className="absolute inset-x-0 top-14 max-h-[calc(100vh-3.5rem)] overflow-y-auto border-b border-cream-400/60 bg-cream-100 px-3 py-4 shadow-lg">
+            <NavList pathname={pathname} onNavigate={() => setMobileOpen(false)} />
+            <div className="mt-4 border-t border-cream-400/60 px-3 pt-4">
+              <a
+                href="https://github.com/projnanda/nandatown"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[0.85rem] font-medium text-ink-500 transition-colors hover:text-ink-900"
+              >
+                GitHub
+              </a>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Left sidebar, md and up */}
@@ -118,56 +212,7 @@ export function Navbar() {
           <div className="flex-1" />
         ) : (
           <nav className="flex-1 overflow-y-auto px-3 pb-4 pt-2">
-            <ul className="space-y-0.5">
-              {items.map((item) => {
-                const active =
-                  !item.external &&
-                  (pathname === item.href || pathname.startsWith(item.href + "/"));
-                return (
-                  <li key={item.label}>
-                    {item.external ? (
-                      <a href={item.href} className={linkCls(false)}>
-                        {item.label}
-                      </a>
-                    ) : (
-                      <Link href={item.href} className={linkCls(active)}>
-                        {item.label}
-                      </Link>
-                    )}
-                    {item.children && (
-                      <ul className="mt-0.5 mb-1.5 ml-4 space-y-0.5 border-l border-cream-400/60 pl-2">
-                        {item.children.map((child) => {
-                          const childActive = pathname.startsWith(child.href);
-                          return (
-                            <li key={child.href}>
-                              {child.href.startsWith("http") ? (
-                                <a
-                                  href={child.href}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="block rounded-md px-3 py-1.5 text-[0.85rem] font-medium text-ink-400 transition-colors hover:bg-cream-200/60 hover:text-ink-900"
-                                >
-                                  {child.label}
-                                </a>
-                              ) : (
-                                <Link
-                                  href={child.href}
-                                  className={`block rounded-md px-3 py-1.5 text-[0.85rem] font-medium transition-colors ${
-                                    childActive ? "bg-cream-200 text-ink-900" : "text-ink-400 hover:bg-cream-200/60 hover:text-ink-900"
-                                  }`}
-                                >
-                                  {child.label}
-                                </Link>
-                              )}
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
+            <NavList pathname={pathname} />
           </nav>
         )}
 
