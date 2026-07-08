@@ -30,7 +30,7 @@ _BUILTINS: dict[tuple[str, str], str] = {
     ("payments", "prepaid_credits"): f"{_REF}.payments.prepaid_credits:PrepaidCredits",
     ("payments", "streaming"): f"{_REF}.payments.streaming:StreamingPayments",
     ("coordination", "contract_net"): f"{_REF}.coordination.contract_net:ContractNet",
-    ("coordination", "quorum_consensus"): "src.consensus.quorum_consensus:QuorumConsensus",
+    ("coordination", "quorum_consensus"): f"{_REF}.coordination.quorum_consensus:QuorumConsensus",
     ("negotiation", "alternating_offers"): (
         f"{_REF}.negotiation.alternating_offers:AlternatingOffers"
     ),

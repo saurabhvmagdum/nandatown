@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-# Quorum consensus with Byzantine (malicious) agents — BFT 3f+1 configuration.
+# BFT consensus with network partition: 7 agents (f=2), 4/3 split for 30%.
 name: quorum_consensus
-description: "1 leader and 6 followers with 2 Byzantine agents (f=2, n=3f+1=7)."
+description: "7 agents with partition 4/3 for first 30% of scenario, then heal."
 
 tier: 1
 seed: 42
@@ -38,7 +38,6 @@ task:
 
 failures:
   message_drop: 0.0
-  byzantine_agents: 0.28
 
 duration: "ticks: 20000"
 
@@ -48,5 +47,4 @@ metrics:
   - agent_count
 
 output:
-  trace: ./traces/quorum_byzantine.jsonl
-
+  trace: ./traces/bft_consensus_partition.jsonl

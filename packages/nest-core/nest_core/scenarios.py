@@ -98,6 +98,6 @@ def _try_load_builtin(name: str) -> None:
 
         register_scenario("receipt_reputation", receipt_reputation_factory)
     elif name == "quorum_consensus":
-        from src.consensus.quorum_consensus_scenario import quorum_consensus_factory
+        from nest_core.scenarios_builtin.quorum_consensus import quorum_consensus_factory
 
         register_scenario("quorum_consensus", quorum_consensus_factory)
