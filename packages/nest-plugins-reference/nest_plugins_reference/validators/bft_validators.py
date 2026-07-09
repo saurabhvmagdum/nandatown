@@ -53,7 +53,7 @@ class BftValidatorReport:
 
     passed: bool
     detail: str
-    evidence: dict[str, Any] = field(default_factory=lambda: cast(dict[str, Any], {}))
+    evidence: dict[str, Any] = field(default_factory=lambda: cast("dict[str, Any]", {}))
 
 
 class BftValidationError(AssertionError):
