@@ -372,6 +372,160 @@ def test_equivocation_detected_and_quarantined() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Disjoint-delivery equivocation: the equivocator sends card_1 ONLY to node A
+# and card_2 ONLY to node B, with NO common recipient. Neither node ever sees
+# both cards from the equivocator directly, so detection depends entirely on
+# the honest anti-entropy mesh propagating the conflicting same-version card
+# between A and B. A digest that carries only ``(version, publisher_id)``
+# judges A's ``(e, 1)`` and B's ``(e, 1)`` as "already in sync" (equal tag) and
+# NEVER exchanges the conflicting card -- the split is permanent and no honest
+# node ever fires the witness map. Carrying a content hash in the digest makes
+# a same-version-but-different-content entry something to exchange, so each
+# side hands the other its copy and BOTH independently detect + quarantine E.
+# ---------------------------------------------------------------------------
+
+
+class _QueuedContext:
+    """Routing context that ENQUEUES sends instead of delivering them inline.
+
+    ``_RoutingContext`` above delivers a payload straight into the target's
+    ``handle_gossip`` (depth-first), so two messages can never be "in flight"
+    at once. The real ``InMemoryTransport`` (see
+    ``nest_core.sim.transport``) instead pushes every send onto the
+    simulator's event queue and drains it breadth-first, so a message A sends
+    to B and a message B sends to A genuinely cross -- both are computed from
+    each sender's pre-delivery state before either is processed. That
+    crossing is exactly what lets two nodes holding conflicting same-version
+    cards each hand the other its copy in one round; this stand-in models it
+    faithfully with a shared FIFO queue.
+
+    Example::
+
+        queue: list[tuple[AgentId, AgentId, bytes]] = []
+        ctx = _QueuedContext(AgentId("a"), random.Random(0), regs, ctxs, queue)
+    """
+
+    def __init__(
+        self,
+        agent_id: AgentId,
+        rng: random.Random,
+        registries: dict[AgentId, ByzantineGossipRegistry],
+        contexts: dict[AgentId, _QueuedContext],
+        queue: list[tuple[AgentId, AgentId, bytes]],
+    ) -> None:
+        self.agent_id = agent_id
+        self.rng = rng
+        self._registries = registries
+        self._contexts = contexts
+        self._queue = queue
+
+    async def send(self, to: AgentId, payload: bytes) -> None:
+        self._queue.append((to, self.agent_id, payload))
+
+
+async def _drain(
+    queue: list[tuple[AgentId, AgentId, bytes]],
+    registries: dict[AgentId, ByzantineGossipRegistry],
+    contexts: dict[AgentId, _QueuedContext],
+) -> None:
+    """Deliver every queued message FIFO, letting handlers enqueue their replies.
+
+    Example::
+
+        await _drain(queue, registries, contexts)
+    """
+    while queue:
+        to, sender, payload = queue.pop(0)
+        await registries[to].handle_gossip(sender, payload, contexts[to])  # type: ignore[arg-type]
+
+
+def _signed_card(
+    ident: DidKeyIdentity, publisher: AgentId, version: int, capabilities: list[str]
+) -> AgentCard:
+    """Build a genuinely-signed card for ``publisher`` over its full write.
+
+    Example::
+
+        card = _signed_card(idents["e"], AgentId("e"), 1, ["sell"])
+    """
+    content = AgentCard(agent_id=publisher, name=str(publisher), capabilities=capabilities)
+    sig = ident.sign(canonical_write_bytes(content, version, False))
+    return content.model_copy(
+        update={
+            "metadata": {
+                "sig": {
+                    "signer": str(publisher),
+                    "value": sig.value.hex(),
+                    "algorithm": sig.algorithm,
+                }
+            }
+        }
+    )
+
+
+def test_disjoint_delivery_equivocation_is_caught() -> None:
+    """Equivocator E hits A and B with conflicting v1 cards; only the mesh can catch it.
+
+    E signs ``card_1`` (``["sell"]``) and ``card_2`` (``["buy"]``) at the SAME
+    version 1 -- both individually valid. ``card_1`` is delivered ONLY to node
+    A and ``card_2`` ONLY to node B (no common recipient), so neither node can
+    detect the equivocation from its own inbox. A and B then run honest gossip
+    rounds with each other over a queued (message-crossing) transport. With
+    the content hash carried in the digest, A advertises ``(e, 1, hash_1)`` and
+    B advertises ``(e, 1, hash_2)``; each treats the other's same-version
+    -different-hash entry as something to exchange, hands over its card, and
+    both independently fire the witness map. Result: BOTH ledgers record
+    ``(e, 1)``, E is quarantined at both, and E is absent from both views.
+
+    RED before the content-hash-in-digest fix (equal ``(version,
+    publisher_id)`` tags look "in sync", the conflicting card never
+    propagates, the split is permanent); GREEN after.
+    """
+    idents = _peered_identities("a", "b", "e")
+    net = GossipNetwork(agent_ids=[AgentId("a"), AgentId("b")])  # E is not a gossip peer
+    reg_a = ByzantineGossipRegistry(AgentId("a"), net, idents["a"])
+    reg_b = ByzantineGossipRegistry(AgentId("b"), net, idents["b"])
+    registries = {AgentId("a"): reg_a, AgentId("b"): reg_b}
+    queue: list[tuple[AgentId, AgentId, bytes]] = []
+    contexts: dict[AgentId, _QueuedContext] = {}
+    for aid in (AgentId("a"), AgentId("b")):
+        contexts[aid] = _QueuedContext(aid, random.Random(0), registries, contexts, queue)
+
+    tag = _WriteTag(version=1, publisher_id=AgentId("e"))
+    card_1 = _signed_card(idents["e"], AgentId("e"), 1, ["sell"])
+    card_2 = _signed_card(idents["e"], AgentId("e"), 1, ["buy"])
+
+    # Disjoint delivery: card_1 ONLY to A, card_2 ONLY to B.
+    async def _deliver(reg: ByzantineGossipRegistry, card: AgentCard, aid: AgentId) -> None:
+        await reg.handle_gossip(AgentId("e"), _push_payload([(card, tag, False)]), contexts[aid])  # type: ignore[arg-type]
+
+    asyncio.run(_deliver(reg_a, card_1, AgentId("a")))
+    asyncio.run(_deliver(reg_b, card_2, AgentId("b")))
+
+    # Pre-gossip: a genuine, permanent-looking split -- A sees "sell", B "buy".
+    assert AgentId("e") in reg_a.view_snapshot()
+    assert AgentId("e") in reg_b.view_snapshot()
+    assert reg_a.equivocations == []
+    assert reg_b.equivocations == []
+
+    async def _rounds() -> None:
+        for _ in range(4):
+            await reg_a.gossip_round(contexts[AgentId("a")])  # type: ignore[arg-type]
+            await reg_b.gossip_round(contexts[AgentId("b")])  # type: ignore[arg-type]
+            await _drain(queue, registries, contexts)
+
+    asyncio.run(_rounds())
+
+    # BOTH honest nodes independently detect + quarantine E and converge to "E absent".
+    assert reg_a.equivocations == [(AgentId("e"), 1)]
+    assert reg_b.equivocations == [(AgentId("e"), 1)]
+    assert AgentId("e") in reg_a._quarantined  # pyright: ignore[reportPrivateUsage]
+    assert AgentId("e") in reg_b._quarantined  # pyright: ignore[reportPrivateUsage]
+    assert AgentId("e") not in reg_a.view_snapshot()
+    assert AgentId("e") not in reg_b.view_snapshot()
+
+
+# ---------------------------------------------------------------------------
 # No-false-positive: the other half of the equivocation-quarantine claim --
 # an HONEST publisher must never be caught by the equivocation witness map.
 # ---------------------------------------------------------------------------

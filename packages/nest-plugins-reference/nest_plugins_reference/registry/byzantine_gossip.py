@@ -72,6 +72,25 @@ local view, the conflict is recorded in ``self.equivocations``, and every
 subsequent card from that publisher — genuinely signed or not — is refused
 without re-litigating the question.
 
+The witness map only fires at a node that actually *receives* both
+conflicting cards, so detection is only as strong as propagation. A
+**disjoint-delivery** equivocator exploits exactly that gap: it sends
+card1 only to group A and card2 only to group B with no common recipient,
+so no single node ever sees both directly. A digest keyed on
+``(version, publisher_id)`` alone would judge A's ``(E, v1)`` and B's
+``(E, v1)`` as already in sync (equal tag) and never exchange the
+conflicting card — the split would be permanent and no honest node would
+ever witness it. This plugin's digest therefore carries a **content hash**
+per entry (``content_hash``), so ``_compute_missing`` treats a
+same-version-but-different-content entry as something to hand over: each
+side pushes the other its conflicting copy, every honest node eventually
+sees both cards, and the witness map fires mesh-wide — A and B both
+quarantine E and converge on "E absent" (see
+``_compute_missing``/``_digest`` and
+``test_disjoint_delivery_equivocation_is_caught``). A same-version
+SAME-content retransmission has an equal hash and is still idempotent — not
+re-exchanged, not a conflict.
+
 Task 4 (this task) closes the last gap the earlier tasks left open: Tasks
 2-3 only decide whether a card that *arrives* at this agent is trustworthy
 (signed, not forged, not equivocating). They do nothing to guarantee a card
@@ -503,30 +522,68 @@ class ByzantineGossipRegistry:
                 continue  # equivocation: do not apply
         """
         key = (card.agent_id, tag.version)
-        content_hash = hashlib.sha256(
-            canonical_write_bytes(card, tag.version, tombstone)
-        ).hexdigest()
+        this_hash = content_hash(card, tag.version, tombstone)
         seen_hash = self._seen.get(key)
         if seen_hash is None:
-            self._seen[key] = content_hash
+            self._seen[key] = this_hash
             return False
-        if seen_hash == content_hash:
+        if seen_hash == this_hash:
             return False
         self.equivocations.append((card.agent_id, tag.version))
         self._quarantined.add(card.agent_id)
         self._view.pop(card.agent_id, None)
         return True
 
-    def _digest(self) -> dict[AgentId, _WriteTag]:
-        return {aid: v.tag for aid, v in self._view.items()}
+    def _digest(self) -> dict[AgentId, tuple[_WriteTag, str]]:
+        """Local view summarised as ``{agent: (write_tag, content_hash)}``.
+
+        Unlike ``GossipRegistry._digest`` (tag only), each entry also carries
+        ``content_hash(card, version, tombstone)`` so a peer can tell a
+        same-``(version, publisher_id)``-but-different-content card apart from
+        an identical one — that is what lets ``_compute_missing`` exchange a
+        conflicting equivocation card the bare tag alone would treat as "in
+        sync." Do not change this shape without changing ``_encode`` /
+        ``_decode_digest`` (byzantine_gossip's own copy) in lockstep; the
+        reference ``gossip.py`` codec is deliberately left untouched.
+
+        Example::
+
+            digest = reg._digest()  # {AgentId("a"): (_WriteTag(1, ...), "abc123...")}
+        """
+        return {
+            aid: (v.tag, content_hash(v.card, v.tag.version, v.tombstone))
+            for aid, v in self._view.items()
+        }
 
     def _compute_missing(
-        self, sender_digest: dict[AgentId, _WriteTag]
+        self, sender_digest: dict[AgentId, tuple[_WriteTag, str]]
     ) -> list[tuple[AgentCard, _WriteTag, bool]]:
+        """Cards to push to a peer given its digest — including conflicting same-version writes.
+
+        Pushes a local card when the peer's digest entry for that agent is
+        **absent**, **strictly older** (``sender_tag < local_tag``), OR **the
+        same tag but a different content hash** — the equivocation case. That
+        last clause is the whole fix: two honest nodes that each accepted a
+        different, both-validly-signed card from an equivocator at the
+        identical ``(publisher, version)`` key have equal ``_WriteTag``s, so
+        without comparing content hashes each would judge the other "in sync"
+        and never hand over its conflicting copy, leaving the split permanent.
+        A same-tag SAME-hash entry is a genuine idempotent redelivery and is
+        NOT re-pushed.
+
+        Example::
+
+            missing = reg._compute_missing({AgentId("e"): (tag, "peer_hash")})
+        """
         out: list[tuple[AgentCard, _WriteTag, bool]] = []
         for aid, versioned in self._view.items():
-            sender_tag = sender_digest.get(aid)
-            if sender_tag is None or sender_tag < versioned.tag:
+            local_hash = content_hash(versioned.card, versioned.tag.version, versioned.tombstone)
+            sender_entry = sender_digest.get(aid)
+            if (
+                sender_entry is None
+                or sender_entry[0] < versioned.tag
+                or (sender_entry[0] == versioned.tag and sender_entry[1] != local_hash)
+            ):
                 out.append((versioned.card, versioned.tag, versioned.tombstone))
         return out
 
@@ -593,6 +650,27 @@ def canonical_write_bytes(card: AgentCard, version: int, tombstone: bool) -> byt
         "tombstone": tombstone,
     }
     return json.dumps(content, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def content_hash(card: AgentCard, version: int, tombstone: bool) -> str:
+    """Hex SHA-256 of a write's canonical bytes — the mesh's content fingerprint.
+
+    Exactly ``sha256(canonical_write_bytes(card, version,
+    tombstone)).hexdigest()``: the single hash used in three places that MUST
+    agree byte-for-byte or equivocation detection silently breaks — the
+    witness map (``_witness_write``), the digest wire entry (``_encode`` /
+    ``_compute_missing``, so a same-version-but-different-content card is
+    exchanged rather than judged "in sync"), and the
+    ``check_no_equivocation_accepted`` validator. Because it covers
+    ``version`` and ``tombstone`` (via ``canonical_write_bytes``), a live card
+    and a tombstone at the same version hash differently and are correctly
+    treated as conflicting writes.
+
+    Example::
+
+        h = content_hash(card, version=1, tombstone=False)
+    """
+    return hashlib.sha256(canonical_write_bytes(card, version, tombstone)).hexdigest()
 
 
 def _sign_card(card: AgentCard, version: int, tombstone: bool, *, identity: Identity) -> AgentCard:
@@ -743,16 +821,36 @@ def _sample_eclipse_resistant(rng: random.Random, peers: list[AgentId], k: int) 
     return anchors + random_peers
 
 
-def _encode(digest: dict[AgentId, _WriteTag]) -> bytes:
-    obj = {str(aid): [t.version, str(t.publisher_id)] for aid, t in digest.items()}
+def _encode(digest: dict[AgentId, tuple[_WriteTag, str]]) -> bytes:
+    """Encode a content-hash-carrying digest as canonical JSON.
+
+    Each entry is ``[version, publisher_id, content_hash]`` — one field wider
+    than ``gossip.py``'s ``[version, publisher_id]`` codec (which this is a
+    deliberate divergent copy of, NOT a change to). ``sort_keys`` keeps the
+    output byte-identical for a given digest, preserving determinism.
+
+    Example::
+
+        raw = _encode({AgentId("a"): (_WriteTag(1, AgentId("a")), "abc123")})
+    """
+    obj = {str(aid): [t.version, str(t.publisher_id), chash] for aid, (t, chash) in digest.items()}
     return json.dumps(obj, sort_keys=True, separators=(",", ":")).encode()
 
 
-def _decode_digest(raw: bytes) -> dict[AgentId, _WriteTag]:
+def _decode_digest(raw: bytes) -> dict[AgentId, tuple[_WriteTag, str]]:
+    """Decode an ``_encode``d digest back into ``{agent: (write_tag, content_hash)}``.
+
+    Inverse of ``_encode``; reads the three-field ``[version, publisher_id,
+    content_hash]`` entries this plugin's digest carries.
+
+    Example::
+
+        digest = _decode_digest(raw)
+    """
     obj = json.loads(raw.decode())
     return {
-        AgentId(aid): _WriteTag(version=int(v), publisher_id=AgentId(pid))
-        for aid, (v, pid) in obj.items()
+        AgentId(aid): (_WriteTag(version=int(v), publisher_id=AgentId(pid)), str(chash))
+        for aid, (v, pid, chash) in obj.items()
     }
 
 
