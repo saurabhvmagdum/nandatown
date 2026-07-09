@@ -61,4 +61,3 @@ __all__ = [
     "check_stale_revocation_blocked",
     "corrupt_proof",
 ]
-

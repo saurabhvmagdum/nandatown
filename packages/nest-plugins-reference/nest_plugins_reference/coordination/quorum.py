@@ -23,7 +23,6 @@ Example::
     assert Quorum.max_byzantine(7) == 2   # (7 - 1) // 3
 """
 
-
 from typing import Any
 
 

@@ -320,8 +320,7 @@ def check_no_stuck_view(
             last_commit = rnd
         elif rnd - last_commit > max_rounds_without_commit:
             stuck_windows.append(
-                f"rounds {last_commit + 1}–{rnd}: "
-                f"{rnd - last_commit} rounds without commit"
+                f"rounds {last_commit + 1}–{rnd}: {rnd - last_commit} rounds without commit"
             )
 
     if stuck_windows:

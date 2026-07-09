@@ -142,6 +142,7 @@ class TestQuorumConsensusPlugin:
 
         vote = await coord.participate(rnd)
         from nest_core.types import Vote
+
         assert isinstance(vote, Vote)
         assert vote.value == "accept"
         assert len(rnd.metadata["votes"]) == 1
@@ -315,8 +316,7 @@ class TestBftValidators:
     def test_no_stuck_view_fails_no_commits(self):
         """Many rounds proposed but no commits — stuck."""
         events: list[dict[str, Any]] = [
-            self._make_send_event("leader", "f0", f"propose:{i}:42")
-            for i in range(1, 20)
+            self._make_send_event("leader", "f0", f"propose:{i}:42") for i in range(1, 20)
         ]
         report = check_no_stuck_view(events, max_rounds_without_commit=5)
         assert not report.passed
@@ -364,7 +364,5 @@ class TestScenarioFactory:
         agents = quorum_consensus_factory(config, {})
 
         # 7 agents: 1 leader + 6 followers, 28% byzantine => 1 byzantine
-        byzantine_agents = [
-            a for a in agents.values() if isinstance(a, ByzantineFollowerAgent)
-        ]
+        byzantine_agents = [a for a in agents.values() if isinstance(a, ByzantineFollowerAgent)]
         assert len(byzantine_agents) >= 1
