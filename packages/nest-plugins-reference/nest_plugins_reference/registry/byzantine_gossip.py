@@ -83,13 +83,48 @@ conflicting card — the split would be permanent and no honest node would
 ever witness it. This plugin's digest therefore carries a **content hash**
 per entry (``content_hash``), so ``_compute_missing`` treats a
 same-version-but-different-content entry as something to hand over: each
-side pushes the other its conflicting copy, every honest node eventually
-sees both cards, and the witness map fires mesh-wide — A and B both
-quarantine E and converge on "E absent" (see
-``_compute_missing``/``_digest`` and
+side pushes the other its conflicting copy, some honest node sees both
+cards, and the witness map fires (see ``_compute_missing``/``_digest`` and
 ``test_disjoint_delivery_equivocation_is_caught``). A same-version
 SAME-content retransmission has an equal hash and is still idempotent — not
 re-exchanged, not a conflict.
+
+Content-hash-in-digest alone, however, is NOT enough to make detection
+*mesh-wide* once there are N>2 honest nodes and multiple equivocators. The
+moment a node witnesses the conflict it **evicts** the card, which drops it
+from ``_digest`` — so that node stops relaying the conflicting copy onward.
+Under disjoint delivery a node that received only one side, whose reachable
+counterparts (holding the other side) all evict before the other card
+propagates to it, is left permanently holding a validly-signed equivocated
+card it never detects — "eviction halts relay" (reproduced at N=10, five
+equivocators: a whole group strands identically at 40 and 500 rounds; see
+``test_disjoint_multi_equivocator_no_stranding``). The card-exchange path
+guarantees only that *some* node witnesses the conflict, not that *every*
+node does.
+
+The fix is to gossip the equivocation **proof**, not just the card. When a
+node detects an equivocation for publisher ``E`` at version ``v`` it holds
+two conflicting, individually-signature-valid writes for ``(E, v)`` — that
+pair is a self-verifying proof (``_equivocation_proofs``, kept in a
+canonical hash order so every node's proof bytes match). The proof is NOT
+removed when the card is evicted, so it keeps propagating: the ``OP_DIGEST``
+payload advertises each node's known-byzantine set, and a peer replies
+(``OP_EQPROOF``) with any proof that peer holds and the sender lacks. On
+receipt (``_ingest_proof``) a node independently re-verifies BOTH signatures
+via the identity layer and confirms the two writes are the same ``(E, v)``
+with different content hashes (``_verify_proof``) before quarantining ``E``
+— so a relay CANNOT fabricate a proof to frame an honest publisher (an
+honest ``E`` never signs two conflicting cards, and a mutated side fails its
+signature; see ``REASON_BAD_PROOF`` and
+``test_fabricated_equivocation_proof_does_not_frame_honest_publisher``).
+This closes eviction-halts-relay: even a stranded node eventually receives
+the proof from any honest neighbor and quarantines ``E``, so ALL honest
+nodes converge on "E quarantined, evicted" regardless of delivery topology.
+The one residual honest caveat: the honest sub-network must be **connected**
+(not partitioned) for the proof to reach everyone, and convergence is
+**eventual** — there is a transient window, while the proof is still in
+flight, during which some honest nodes have quarantined ``E`` and others
+have not yet. See ``VERIFICATION.md``.
 
 Task 4 (this task) closes the last gap the earlier tasks left open: Tasks
 2-3 only decide whether a card that *arrives* at this agent is trustworthy
@@ -163,6 +198,17 @@ if TYPE_CHECKING:
     from nest_core.sim.agent import AgentContext
 
 
+_ProofWrite = tuple[AgentCard, _WriteTag, bool]
+"""One side of an equivocation proof: a ``(card, tag, tombstone)`` write whose
+embedded signature verifies on its own. A proof is a pair of these that
+conflict (same ``(publisher, version)``, different content hash).
+
+Example::
+
+    write: _ProofWrite = (card, _WriteTag(1, AgentId("e")), False)
+"""
+
+
 REASON_MISSING_SIGNATURE = "missing_signature"
 """Rejection reason: card carries no ``metadata["sig"]`` at all.
 
@@ -199,6 +245,33 @@ conflicting writes once cannot be trusted to have stopped.
 Example::
 
     reg.rejections.append((AgentId("e"), REASON_QUARANTINED))
+"""
+
+REASON_BAD_PROOF = "bad_equivocation_proof"
+"""Rejection reason: an ``OP_EQPROOF`` equivocation proof for a publisher did
+NOT independently verify — the two writes are not both validly signed by the
+publisher, are not at the same version, or do not actually conflict (equal
+content hash). This is the anti-framing guard on the proof-gossip path: a
+relay with no key for an honest publisher ``E`` cannot fabricate a conflicting
+signed-write pair for ``E`` (an honest ``E`` never signs two conflicting
+cards), so a bogus proof is dropped here and ``E`` is NOT quarantined.
+
+Example::
+
+    reg.rejections.append((AgentId("e"), REASON_BAD_PROOF))
+"""
+
+OP_EQPROOF = b"Q"
+"""Wire op (``byzantine_gossip``'s own extension, not in reference ``gossip.py``):
+push of one or more equivocation PROOFs — each a pair of conflicting,
+individually-signature-valid writes for a single ``(publisher, version)``.
+Sent in reply to an ``OP_DIGEST`` whose advertised known-byzantine set does
+not yet include a publisher this node can prove byzantine, so the proof
+propagates mesh-wide independently of card eviction.
+
+Example::
+
+    payload = GOSSIP_PREFIX + OP_EQPROOF + _encode_proofs([(AgentId("e"), proof)])
 """
 
 
@@ -309,6 +382,32 @@ class ByzantineGossipRegistry:
         write (same hash) is not equivocation and is left alone; see
         ``_witness_write``.
         """
+        self._first_write: dict[tuple[AgentId, int], tuple[AgentCard, _WriteTag, bool]] = {}
+        """First verified write ``(card, tag, tombstone)`` seen at each
+        ``(publisher_id, version)`` key — the counterpart the witness map needs
+        to reconstruct a self-verifying equivocation PROOF the moment a
+        conflicting second write arrives (``_seen`` alone keeps only the hash).
+        Grows in lockstep with ``_seen`` and, like it, is never pruned.
+        """
+        self._equivocation_proofs: dict[AgentId, tuple[_ProofWrite, _ProofWrite]] = {}
+        """Self-verifying equivocation proofs: ``publisher_id -> (write_a,
+        write_b)`` where each write is a ``(card, tag, tombstone)`` triple that
+        individually passes ``_verify_card`` and the two conflict (same
+        ``(publisher, version)``, different content hash).  The two writes are
+        stored in a canonical order (by content hash, see ``_canonical_proof``)
+        so every node holds byte-identical proof bytes regardless of which side
+        it saw first.  **Survives card eviction** — this is the whole fix: a
+        node that has evicted an equivocator's card keeps the proof so it still
+        relays the conflict onward via ``OP_EQPROOF``, closing the
+        eviction-halts-relay stranding gap under disjoint multi-equivocator
+        delivery.  Invariant: ``set(self._equivocation_proofs) ==
+        self._quarantined`` (every quarantine path stores a proof).  Exposed
+        for validators/tests, not part of the ``Registry`` Protocol.
+
+        Example::
+
+            assert set(reg._equivocation_proofs) == {AgentId("e")}
+        """
 
     # ------------------------------------------------------------------
     # Registry protocol
@@ -397,6 +496,11 @@ class ByzantineGossipRegistry:
         section for the eclipse threat model this defends against and its
         honest limit (the anchor guarantee is heuristic, not a proof).
 
+        The digest also advertises this node's known-byzantine set (publishers
+        it holds an equivocation proof for) so a peer replies with only the
+        proofs this node is still missing — that is how equivocation proofs
+        ride anti-entropy mesh-wide, independent of card eviction.
+
         Example::
 
             await reg.gossip_round(ctx)
@@ -407,7 +511,7 @@ class ByzantineGossipRegistry:
         fanout = min(self._network.fanout, len(peers))
         chosen = _sample_eclipse_resistant(ctx.rng, peers, fanout)
         digest = self._digest()
-        payload = GOSSIP_PREFIX + OP_DIGEST + _encode(digest)
+        payload = GOSSIP_PREFIX + OP_DIGEST + _encode(digest, self._known_byzantine())
         for peer in chosen:
             await ctx.send(peer, payload)
 
@@ -430,6 +534,16 @@ class ByzantineGossipRegistry:
         alone can catch this — and quarantines the publisher on the spot
         (see ``equivocations`` and the module docstring).
 
+        An ``OP_EQPROOF`` message carries equivocation PROOFs (pairs of
+        conflicting signed writes). Each is independently re-verified via
+        ``_ingest_proof`` — both signatures must pass and the two writes must
+        genuinely conflict — before the publisher is quarantined, so a relay
+        cannot forge a proof to frame an honest publisher. This is what makes
+        the equivocation defense mesh-wide even under disjoint delivery: the
+        proof survives card eviction and keeps propagating, so a node stranded
+        with only one side of the conflict still learns the publisher is
+        byzantine from any honest neighbor.
+
         Example::
 
             handled = await reg.handle_gossip(sender, payload, ctx)
@@ -441,11 +555,15 @@ class ByzantineGossipRegistry:
             return True
         op, rest = body[:1], body[1:]
         if op == OP_DIGEST:
-            sender_digest = _decode_digest(rest)
+            sender_digest, sender_known_byz = _decode_digest(rest)
             missing = self._compute_missing(sender_digest)
             if missing:
                 push_payload = GOSSIP_PREFIX + OP_PUSH + _encode_push(missing)
                 await ctx.send(sender, push_payload)
+            missing_proofs = self._compute_missing_proofs(sender_known_byz)
+            if missing_proofs:
+                proof_payload = GOSSIP_PREFIX + OP_EQPROOF + _encode_proofs(missing_proofs)
+                await ctx.send(sender, proof_payload)
             return True
         if op == OP_PUSH:
             for card, tag, tombstone in _decode_push(rest):
@@ -459,6 +577,10 @@ class ByzantineGossipRegistry:
                 if self._witness_write(card, tag, tombstone):
                     continue
                 self._apply(card, tag, tombstone=tombstone)
+            return True
+        if op == OP_EQPROOF:
+            for publisher, write_a, write_b in _decode_proofs(rest):
+                self._ingest_proof(publisher, write_a, write_b)
             return True
         return True  # Unknown op: consume silently so junk doesn't escape.
 
@@ -511,10 +633,12 @@ class ByzantineGossipRegistry:
         * Seen before with a **different** hash → proof this publisher
           signed two conflicting writes at the same version. Both are
           validly signed — this is exactly what a signature check cannot
-          catch. Appends ``(publisher, version)`` to ``self.equivocations``,
-          adds the publisher to ``self._quarantined``, evicts any card from
-          this publisher already sitting in the local view, and returns
-          ``True`` so the caller does not ``_apply`` this card either.
+          catch. Builds a self-verifying equivocation proof from the first
+          write (kept in ``self._first_write``) and this conflicting one,
+          quarantines the publisher via ``_quarantine_with_proof`` (records
+          ``(publisher, version)`` in ``self.equivocations``, stores the proof
+          so it survives eviction and keeps propagating, evicts the card), and
+          returns ``True`` so the caller does not ``_apply`` this card either.
 
         Example::
 
@@ -526,13 +650,99 @@ class ByzantineGossipRegistry:
         seen_hash = self._seen.get(key)
         if seen_hash is None:
             self._seen[key] = this_hash
+            self._first_write[key] = (card, tag, tombstone)
             return False
         if seen_hash == this_hash:
             return False
-        self.equivocations.append((card.agent_id, tag.version))
-        self._quarantined.add(card.agent_id)
-        self._view.pop(card.agent_id, None)
+        first_write = self._first_write[key]
+        proof = _canonical_proof(first_write, (card, tag, tombstone))
+        self._quarantine_with_proof(card.agent_id, tag.version, proof)
         return True
+
+    def _quarantine_with_proof(
+        self, publisher: AgentId, version: int, proof: tuple[_ProofWrite, _ProofWrite]
+    ) -> None:
+        """Quarantine ``publisher`` and store its equivocation ``proof`` (idempotent).
+
+        The single quarantine path shared by direct witnessing
+        (``_witness_write``) and proof receipt (``_ingest_proof``): appends
+        ``(publisher, version)`` to ``self.equivocations``, adds ``publisher``
+        to ``self._quarantined``, stores ``proof`` in
+        ``self._equivocation_proofs`` (so this node now RELAYS it, surviving
+        card eviction), and evicts any card from ``publisher`` in the local
+        view. A no-op if ``publisher`` is already quarantined, so a proof that
+        arrives after local detection (or a duplicate proof) neither
+        double-records the ledger nor re-litigates the quarantine.
+
+        Example::
+
+            reg._quarantine_with_proof(AgentId("e"), 1, proof)
+        """
+        if publisher in self._quarantined:
+            return
+        self.equivocations.append((publisher, version))
+        self._quarantined.add(publisher)
+        self._equivocation_proofs[publisher] = proof
+        self._view.pop(publisher, None)
+
+    def _ingest_proof(self, publisher: AgentId, write_a: _ProofWrite, write_b: _ProofWrite) -> None:
+        """Verify an inbound equivocation proof for ``publisher`` and quarantine on success.
+
+        Independently re-verifies BOTH writes' signatures against
+        ``publisher`` and confirms they genuinely conflict (same
+        ``(publisher, version)``, different content hash) — see
+        ``_verify_proof``. Only then is ``publisher`` quarantined. A relay
+        with no key for an honest ``publisher`` cannot fabricate a passing
+        proof (an honest publisher never signs two conflicting cards), so this
+        path CANNOT be used to frame an honest publisher; a proof that fails
+        verification is recorded as ``REASON_BAD_PROOF`` and ignored.
+        Already-quarantined publishers are skipped (idempotent retransmission).
+
+        Example::
+
+            reg._ingest_proof(AgentId("e"), write_a, write_b)
+        """
+        if publisher in self._quarantined:
+            return
+        if not _verify_proof(publisher, write_a, write_b, self._identity):
+            self.rejections.append((publisher, REASON_BAD_PROOF))
+            return
+        proof = _canonical_proof(write_a, write_b)
+        self._quarantine_with_proof(publisher, write_a[1].version, proof)
+
+    def _known_byzantine(self) -> list[AgentId]:
+        """Publishers this node holds an equivocation proof for, sorted deterministically.
+
+        Advertised in the ``OP_DIGEST`` payload so a peer only sends back the
+        proofs this node is still missing. Sorted for byte-stable wire output.
+
+        Example::
+
+            known = reg._known_byzantine()  # [AgentId("e0"), AgentId("e1")]
+        """
+        return sorted(self._equivocation_proofs)
+
+    def _compute_missing_proofs(
+        self, sender_known_byz: set[AgentId]
+    ) -> list[tuple[AgentId, _ProofWrite, _ProofWrite]]:
+        """Proofs to hand a peer: every proof this node holds the peer lacks.
+
+        Given the peer's advertised known-byzantine set (from its digest),
+        returns ``(publisher, write_a, write_b)`` for each publisher this node
+        can prove byzantine that the peer does not yet know about. Iterated in
+        sorted publisher order so the wire bytes are deterministic.
+
+        Example::
+
+            proofs = reg._compute_missing_proofs({AgentId("e0")})
+        """
+        out: list[tuple[AgentId, _ProofWrite, _ProofWrite]] = []
+        for publisher in sorted(self._equivocation_proofs):
+            if publisher in sender_known_byz:
+                continue
+            write_a, write_b = self._equivocation_proofs[publisher]
+            out.append((publisher, write_a, write_b))
+        return out
 
     def _digest(self) -> dict[AgentId, tuple[_WriteTag, str]]:
         """Local view summarised as ``{agent: (write_tag, content_hash)}``.
@@ -821,60 +1031,174 @@ def _sample_eclipse_resistant(rng: random.Random, peers: list[AgentId], k: int) 
     return anchors + random_peers
 
 
-def _encode(digest: dict[AgentId, tuple[_WriteTag, str]]) -> bytes:
-    """Encode a content-hash-carrying digest as canonical JSON.
+def _encode(digest: dict[AgentId, tuple[_WriteTag, str]], known_byzantine: list[AgentId]) -> bytes:
+    """Encode a content-hash-carrying digest plus a known-byzantine set as canonical JSON.
 
-    Each entry is ``[version, publisher_id, content_hash]`` — one field wider
-    than ``gossip.py``'s ``[version, publisher_id]`` codec (which this is a
-    deliberate divergent copy of, NOT a change to). ``sort_keys`` keeps the
-    output byte-identical for a given digest, preserving determinism.
+    Wraps two sections: ``"cards"`` (each entry ``[version, publisher_id,
+    content_hash]`` — one field wider than ``gossip.py``'s ``[version,
+    publisher_id]`` codec, which this is a deliberate divergent copy of, NOT a
+    change to) and ``"byz"`` (the sorted list of publisher ids this node holds
+    an equivocation proof for, so the peer skips proofs this node already has).
+    ``sort_keys`` plus the pre-sorted ``byz`` list keep the output
+    byte-identical for a given state, preserving determinism.
 
     Example::
 
-        raw = _encode({AgentId("a"): (_WriteTag(1, AgentId("a")), "abc123")})
+        raw = _encode({AgentId("a"): (_WriteTag(1, AgentId("a")), "abc123")}, [AgentId("e")])
     """
-    obj = {str(aid): [t.version, str(t.publisher_id), chash] for aid, (t, chash) in digest.items()}
+    cards = {
+        str(aid): [t.version, str(t.publisher_id), chash] for aid, (t, chash) in digest.items()
+    }
+    obj = {"cards": cards, "byz": [str(aid) for aid in known_byzantine]}
     return json.dumps(obj, sort_keys=True, separators=(",", ":")).encode()
 
 
-def _decode_digest(raw: bytes) -> dict[AgentId, tuple[_WriteTag, str]]:
-    """Decode an ``_encode``d digest back into ``{agent: (write_tag, content_hash)}``.
+def _decode_digest(raw: bytes) -> tuple[dict[AgentId, tuple[_WriteTag, str]], set[AgentId]]:
+    """Decode an ``_encode``d digest into ``({agent: (tag, hash)}, known_byzantine_set)``.
 
-    Inverse of ``_encode``; reads the three-field ``[version, publisher_id,
-    content_hash]`` entries this plugin's digest carries.
+    Inverse of ``_encode``; reads the ``"cards"`` section's three-field
+    ``[version, publisher_id, content_hash]`` entries and the ``"byz"``
+    known-byzantine id list.
 
     Example::
 
-        digest = _decode_digest(raw)
+        digest, known_byz = _decode_digest(raw)
     """
     obj = json.loads(raw.decode())
-    return {
+    cards = {
         AgentId(aid): (_WriteTag(version=int(v), publisher_id=AgentId(pid)), str(chash))
-        for aid, (v, pid, chash) in obj.items()
+        for aid, (v, pid, chash) in obj["cards"].items()
+    }
+    known_byz = {AgentId(str(aid)) for aid in obj["byz"]}
+    return cards, known_byz
+
+
+def _encode_write(write: _ProofWrite) -> dict[str, object]:
+    """Encode a single ``(card, tag, tombstone)`` write as a JSON-ready dict.
+
+    Shared by ``_encode_push`` and ``_encode_proofs`` so a proof's writes and
+    a pushed card use the identical, replay-stable wire shape.
+
+    Example::
+
+        obj = _encode_write((card, _WriteTag(1, AgentId("e")), False))
+    """
+    card, tag, tombstone = write
+    return {
+        "card": card.model_dump(mode="json"),
+        "version": tag.version,
+        "publisher": str(tag.publisher_id),
+        "tombstone": tombstone,
     }
 
 
+def _decode_write(entry: dict[str, object]) -> _ProofWrite:
+    """Decode a single write dict produced by ``_encode_write``.
+
+    Example::
+
+        write = _decode_write({"card": {...}, "version": 1, "publisher": "e", "tombstone": False})
+    """
+    card = AgentCard.model_validate(entry["card"])
+    tag = _WriteTag(
+        version=int(entry["version"]),  # type: ignore[arg-type]
+        publisher_id=AgentId(str(entry["publisher"])),
+    )
+    return card, tag, bool(entry["tombstone"])
+
+
 def _encode_push(items: list[tuple[AgentCard, _WriteTag, bool]]) -> bytes:
-    obj = [
-        {
-            "card": card.model_dump(mode="json"),
-            "version": tag.version,
-            "publisher": str(tag.publisher_id),
-            "tombstone": tombstone,
-        }
-        for card, tag, tombstone in items
-    ]
+    obj = [_encode_write(item) for item in items]
     return json.dumps(obj, sort_keys=True, separators=(",", ":")).encode()
 
 
 def _decode_push(raw: bytes) -> list[tuple[AgentCard, _WriteTag, bool]]:
     obj: list[dict[str, object]] = json.loads(raw.decode())
-    out: list[tuple[AgentCard, _WriteTag, bool]] = []
+    return [_decode_write(entry) for entry in obj]
+
+
+def _canonical_proof(write_x: _ProofWrite, write_y: _ProofWrite) -> tuple[_ProofWrite, _ProofWrite]:
+    """Order two conflicting writes canonically (by content hash) into a proof pair.
+
+    Both witnessing nodes (which may have seen the two sides in opposite
+    order) and every node that later receives the proof end up with the SAME
+    byte-ordering, so proof bytes are node-independent and replay-stable.
+
+    Example::
+
+        proof = _canonical_proof(write_a, write_b)
+    """
+    hx = content_hash(write_x[0], write_x[1].version, write_x[2])
+    hy = content_hash(write_y[0], write_y[1].version, write_y[2])
+    return (write_x, write_y) if hx <= hy else (write_y, write_x)
+
+
+def _verify_proof(
+    publisher: AgentId, write_a: _ProofWrite, write_b: _ProofWrite, identity: Identity
+) -> bool:
+    """Return whether ``(write_a, write_b)`` is a genuine equivocation proof for ``publisher``.
+
+    True only if BOTH writes are authored by ``publisher`` at the SAME
+    version, BOTH signatures independently verify (via ``_verify_card``), and
+    the two writes genuinely CONFLICT (different content hash). This is the
+    anti-framing core: a relay cannot fabricate a passing proof for an honest
+    publisher, because forging it would require two validly-signed conflicting
+    cards under that publisher's key — which an honest publisher never
+    produces. Mutating or forging one side makes that side's signature fail,
+    so the proof is rejected and the publisher is NOT quarantined.
+
+    Example::
+
+        assert _verify_proof(AgentId("e"), write_a, write_b, identity)
+    """
+    card_a, tag_a, tomb_a = write_a
+    card_b, tag_b, tomb_b = write_b
+    if tag_a.version != tag_b.version:
+        return False
+    for card, tag in ((card_a, tag_a), (card_b, tag_b)):
+        if card.agent_id != publisher or tag.publisher_id != publisher:
+            return False
+    if _verify_card(card_a, tag_a.version, tomb_a, identity) is not None:
+        return False
+    if _verify_card(card_b, tag_b.version, tomb_b, identity) is not None:
+        return False
+    hash_a = content_hash(card_a, tag_a.version, tomb_a)
+    hash_b = content_hash(card_b, tag_b.version, tomb_b)
+    return hash_a != hash_b
+
+
+def _encode_proofs(items: list[tuple[AgentId, _ProofWrite, _ProofWrite]]) -> bytes:
+    """Encode equivocation proofs as canonical JSON for an ``OP_EQPROOF`` message.
+
+    Each entry is ``{"publisher": id, "writes": [write_a, write_b]}`` with each
+    write in ``_encode_write`` shape. Callers pass items in sorted-publisher
+    order and each proof's two writes are already canonically ordered
+    (``_canonical_proof``), so the output is byte-stable across replays.
+
+    Example::
+
+        raw = _encode_proofs([(AgentId("e"), write_a, write_b)])
+    """
+    obj = [
+        {"publisher": str(publisher), "writes": [_encode_write(write_a), _encode_write(write_b)]}
+        for publisher, write_a, write_b in items
+    ]
+    return json.dumps(obj, sort_keys=True, separators=(",", ":")).encode()
+
+
+def _decode_proofs(raw: bytes) -> list[tuple[AgentId, _ProofWrite, _ProofWrite]]:
+    """Decode an ``_encode_proofs`` payload into ``(publisher, write_a, write_b)`` tuples.
+
+    Example::
+
+        proofs = _decode_proofs(raw)
+    """
+    obj: list[dict[str, object]] = json.loads(raw.decode())
+    out: list[tuple[AgentId, _ProofWrite, _ProofWrite]] = []
     for entry in obj:
-        card = AgentCard.model_validate(entry["card"])
-        tag = _WriteTag(
-            version=int(entry["version"]),  # type: ignore[arg-type]
-            publisher_id=AgentId(str(entry["publisher"])),
-        )
-        out.append((card, tag, bool(entry["tombstone"])))
+        publisher = AgentId(str(entry["publisher"]))
+        writes = cast("list[dict[str, object]]", entry["writes"])
+        write_a = _decode_write(writes[0])
+        write_b = _decode_write(writes[1])
+        out.append((publisher, write_a, write_b))
     return out

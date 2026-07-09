@@ -32,7 +32,11 @@ byzantine fault tolerance for the registry layer as a whole.
   forgery/impersonation rejection, replay-under-forged-version, tombstone
   flip, equivocation detection + quarantine, no-false-positive guards
   (honest multi-write history, idempotent retransmission), eclipse-resistant
-  sampling (adversarial seed + determinism).
+  sampling (adversarial seed + determinism), **disjoint multi-equivocator
+  no-stranding** (`test_disjoint_multi_equivocator_no_stranding`, N=10 / five
+  equivocators / disjoint delivery: every honest node quarantines every
+  equivocator via proof-gossip, none stranded), and the **proof-path
+  anti-framing guard** (`test_fabricated_equivocation_proof_does_not_frame_honest_publisher`).
 - **Validator unit tests** -- `test_registry_byzantine_validators.py`: each
   of the three validators against hand-built "reference-style" evidence
   (proving it FAILs) and hand-built "`byzantine_gossip`-style" evidence
@@ -219,48 +223,72 @@ the test was written to *document* it (e.g.
    identity needs a governance decision this plugin does not make on its
    own. A real deployment wanting rehabilitation would need an external,
    explicit un-quarantine action -- there is none here.
-   - **Disjoint-delivery equivocation is now closed, mesh-wide.** An earlier
-     iteration of this plugin had a real gap here: the witness map only
-     fires at a node that actually *receives* both conflicting cards, so a
-     digest keyed on bare `(version, publisher_id)` would judge two nodes
-     that each independently accepted a different conflicting write at the
-     identical key as already "in sync" (equal tag) and never exchange the
-     other's copy -- an equivocator sending card1 only to group A and card2
-     only to group B, with no common recipient, could split the mesh
-     permanently with no honest node ever witnessing it. That gap is fixed:
-     the `OP_DIGEST` payload now carries a per-entry **content hash** in
-     addition to the write tag, and `_compute_missing` pushes a card
-     whenever a peer's digest entry is the *same tag but a different
-     content hash* -- not just when it's absent or stale. That one clause
-     is what makes a conflicting same-version write propagate over
-     anti-entropy instead of being mistaken for a redelivery, so group A's
-     and group B's copies of the equivocator's cards eventually reach each
-     other, every honest node independently re-derives the conflict from
-     its own witness map, records `(publisher, version)` in its own
-     `equivocations` ledger, and quarantines and evicts the publisher --
-     with no dependence on which node(s) were the original direct
-     recipients. See `_compute_missing`'s same-tag-different-hash push
-     clause (`nest_plugins_reference/registry/byzantine_gossip.py`) and
-     `test_disjoint_delivery_equivocation_is_caught`
-     (`test_byzantine_gossip.py`), which pins down exactly this topology and
-     asserts both group-A and group-B honest nodes catch it independently.
-   - **Residual caveat (still honest, now narrower): quarantine itself is
-     not gossiped as explicit shared state.** There is no "quarantine
-     announcement" message -- each node re-derives quarantine-worthiness
-     independently, from the conflicting card it eventually receives over
-     anti-entropy, not from being told "node X quarantined agent E." This
-     means there can be a brief transient window, while the conflicting
-     write is still propagating, during which some honest nodes have
-     already quarantined the equivocator and others have not yet seen the
-     second card -- but this window closes as propagation completes, and
-     convergence to "the equivocator is quarantined and evicted everywhere"
-     holds mesh-wide, unlike the old disjoint-delivery gap where the split
-     was permanent. The validator's bar (`check_no_equivocation_accepted`)
-     remains "*some* honest agent's ledger recorded it," which is now a
-     conservative floor rather than the only honest guarantee available --
-     `test_disjoint_delivery_equivocation_is_caught` demonstrates the
-     stronger "multiple/all honest agents recorded it" property directly
-     for that scenario.
+   - **Disjoint-delivery equivocation is closed mesh-wide -- by proof-gossip,
+     not by content-hash-in-digest alone.** This claim was audited twice and
+     the honest history matters. *First iteration:* the witness map only fires
+     at a node that actually *receives* both conflicting cards, so a digest
+     keyed on bare `(version, publisher_id)` judged two nodes that each
+     accepted a different conflicting write at the identical key as "in sync"
+     (equal tag) and never exchanged copies -- a permanent split. That was
+     addressed by carrying a per-entry **content hash** in the `OP_DIGEST`
+     payload so `_compute_missing` hands over a *same-tag-but-different-hash*
+     entry (see `test_disjoint_delivery_equivocation_is_caught`, N=2).
+     *Second audit (this fix):* content-hash-in-digest is **necessary but not
+     sufficient** at N>2 honest nodes with multiple equivocators. The moment a
+     node witnesses the conflict it **evicts** the card, dropping it from
+     `_digest` -- so it stops relaying the conflicting copy onward
+     ("eviction halts relay"). Under disjoint delivery a node that received
+     only one side, whose reachable counterparts holding the other side all
+     evict before the other card reaches it, is left **permanently** holding a
+     validly-signed equivocated card it never detects. Reproduced with the
+     plugin's own harness at N=10 / five equivocators / seed 1: an entire
+     honest group strands, identically at 40 and 500 rounds
+     (`test_disjoint_multi_equivocator_no_stranding`, RED before this fix).
+     The card-exchange path guarantees only that *some* node witnesses the
+     conflict, not that *every* node does. **The fix** gossips the
+     equivocation **proof** -- the two conflicting, individually
+     -signature-valid writes for `(E, v)` -- independently of card eviction:
+     `self._equivocation_proofs` survives eviction; the `OP_DIGEST` payload
+     advertises each node's known-byzantine set and a peer replies
+     (`OP_EQPROOF`) with any proof the sender lacks; on receipt
+     `_ingest_proof` **independently re-verifies both signatures** and
+     confirms same-`(E, v)`-different-hash (`_verify_proof`) before
+     quarantining. So a stranded node eventually learns `E` is byzantine from
+     any honest neighbor and every honest node converges on "E quarantined,
+     evicted" regardless of delivery topology. See
+     `test_disjoint_multi_equivocator_no_stranding` (GREEN after), which
+     asserts *every* honest node catches *every* equivocator with no
+     stranding and no false-positive quarantine of an honest publisher.
+   - **Anti-framing is preserved on the new proof path.** The proof path is a
+     new way to induce a quarantine, so it was explicitly checked that it is
+     NOT a new way to *frame* an honest publisher. `_ingest_proof` re-verifies
+     both signatures against the identity layer before acting, so a relay
+     holding no key for an honest `E` cannot fabricate a passing proof: an
+     honest `E` never signs two conflicting cards, and any mutated/forged side
+     fails its own signature check. A bogus proof is recorded as
+     `REASON_BAD_PROOF` and dropped, and `E` is not quarantined -- see
+     `test_fabricated_equivocation_proof_does_not_frame_honest_publisher`
+     (one real signed card + one mutated card -> `E` untouched). This upholds
+     the same anti-framing guarantee the witness map already had (only a
+     publisher's *own* validly-signed conflicting writes can implicate it).
+   - **Residual caveat (still honest, now precise): connected honest
+     sub-network + eventual convergence.** Two conditions bound the mesh-wide
+     claim. (1) **Connectivity:** the proof reaches every honest node only if
+     the honest sub-network is connected -- a network partition (or a full
+     eclipse of a victim, see limitation 1) that isolates an honest node from
+     every node holding the proof delays its quarantine until the partition
+     heals, exactly like any other gossip data. (2) **Eventual, not
+     instantaneous:** there is no synchronous "quarantine announcement" -- the
+     proof rides ordinary anti-entropy, so there is a transient window while
+     the proof is still in flight during which some honest nodes have
+     quarantined `E` and others have not yet. That window closes as
+     propagation completes; convergence to "quarantined and evicted
+     everywhere" then holds mesh-wide, unlike the old eviction-halts-relay gap
+     where the strand was permanent. The validator's bar
+     (`check_no_equivocation_accepted`) remains "*some* honest agent's ledger
+     recorded it," now a conservative floor rather than the only guarantee
+     available -- `test_disjoint_multi_equivocator_no_stranding` demonstrates
+     the stronger "*every* honest agent recorded it" property directly.
 5. **`check_no_forged_card_in_view`'s gossip-FAIL is partly structural.**
    `gossip` never signs *anything*, including its own honest agents' own
    registrations -- so this validator FAILs under `gossip` in every

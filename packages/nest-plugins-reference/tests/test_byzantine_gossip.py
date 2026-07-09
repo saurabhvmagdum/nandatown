@@ -25,6 +25,7 @@ from nest_core.plugins import PluginRegistry
 from nest_core.types import AgentCard, AgentId, Query, Signature
 from nest_plugins_reference.identity.did_key import DidKeyIdentity
 from nest_plugins_reference.registry.byzantine_gossip import (
+    OP_EQPROOF,
     ByzantineGossipRegistry,
     _sample_eclipse_resistant,  # pyright: ignore[reportPrivateUsage]
     _sample_without_replacement,  # pyright: ignore[reportPrivateUsage]
@@ -523,6 +524,186 @@ def test_disjoint_delivery_equivocation_is_caught() -> None:
     assert AgentId("e") in reg_b._quarantined  # pyright: ignore[reportPrivateUsage]
     assert AgentId("e") not in reg_a.view_snapshot()
     assert AgentId("e") not in reg_b.view_snapshot()
+
+
+# ---------------------------------------------------------------------------
+# Disjoint MULTI-equivocator at scale: the earlier content-hash-in-digest fix
+# closes the N=2 / single-equivocator case, but NOT disjoint delivery with
+# N>2 honest nodes and several equivocators. Once a node detects an
+# equivocation it EVICTS the card, dropping it from `_digest`, so it stops
+# relaying the conflicting copy onward. Under disjoint delivery (card1 -> group
+# A only, card2 -> group B only, no common recipient) a node that received only
+# one side, whose reachable counterparts holding the other side all evict
+# before the other card reaches it, is left PERMANENTLY holding a validly
+# -signed equivocated card it never detects. The fix is to gossip the
+# equivocation PROOF (the two conflicting signed writes) independently of card
+# eviction, so a stranded node still learns the publisher is byzantine from any
+# honest neighbor. This test reproduces the auditor's scenario (N=10, 5
+# equivocators, seed 1 strands the whole of group A permanently -- identical at
+# 40 and 500 rounds) and asserts the post-fix property: EVERY honest node
+# quarantines EVERY equivocator, none is stranded, and no honest publisher is
+# falsely quarantined.
+# ---------------------------------------------------------------------------
+
+
+def test_disjoint_multi_equivocator_no_stranding() -> None:
+    """N=10 honest, 5 equivocators, disjoint delivery: no honest node is stranded.
+
+    Each equivocator ``eK`` signs ``card1`` (``["sell"]``) and ``card2``
+    (``["buy"]``) at the SAME version 1 -- both individually valid. ``card1``
+    is delivered ONLY to group A (``h00``..``h04``) and ``card2`` ONLY to group
+    B (``h05``..``h09``), with no common recipient. Every honest node also
+    registers its own honest card. The honest nodes then run many gossip rounds
+    over the message-crossing ``_QueuedContext`` transport.
+
+    RED before the proof-gossip fix: at seed 1 the whole of group A strands --
+    each of ``h00``..``h04`` permanently holds all five equivocated cards and
+    detects none, because group B evicts (and thus stops relaying) the
+    conflicting copies before they reach group A. GREEN after: the equivocation
+    proof propagates independently of card eviction, so EVERY honest node
+    quarantines EVERY equivocator, no honest node retains any equivocated card,
+    and NO honest publisher is falsely quarantined.
+    """
+    honest = [f"h{i:02d}" for i in range(10)]
+    equivocators = [f"e{i}" for i in range(5)]
+    idents = _peered_identities(*honest, *equivocators)
+    net = GossipNetwork(agent_ids=[AgentId(h) for h in honest])  # equivocators are not peers
+    registries = {AgentId(h): ByzantineGossipRegistry(AgentId(h), net, idents[h]) for h in honest}
+    queue: list[tuple[AgentId, AgentId, bytes]] = []
+    contexts: dict[AgentId, _QueuedContext] = {}
+    for h in honest:
+        contexts[AgentId(h)] = _QueuedContext(
+            AgentId(h), random.Random(1), registries, contexts, queue
+        )
+
+    group_a = [AgentId(h) for h in honest[:5]]
+    group_b = [AgentId(h) for h in honest[5:]]
+
+    async def _drive() -> None:
+        # Every honest node registers a genuine card -- these must NEVER be
+        # mistaken for equivocation (no false positive).
+        for h in honest:
+            await registries[AgentId(h)].register(
+                AgentCard(agent_id=AgentId(h), name=h.upper(), capabilities=["sell"])
+            )
+
+        # Disjoint delivery: card1 ONLY to group A, card2 ONLY to group B.
+        for e in equivocators:
+            tag = _WriteTag(version=1, publisher_id=AgentId(e))
+            card_1 = _signed_card(idents[e], AgentId(e), 1, ["sell"])
+            card_2 = _signed_card(idents[e], AgentId(e), 1, ["buy"])
+            for aid in group_a:
+                await registries[aid].handle_gossip(
+                    AgentId(e),
+                    _push_payload([(card_1, tag, False)]),
+                    contexts[aid],  # type: ignore[arg-type]
+                )
+            for bid in group_b:
+                await registries[bid].handle_gossip(
+                    AgentId(e),
+                    _push_payload([(card_2, tag, False)]),
+                    contexts[bid],  # type: ignore[arg-type]
+                )
+
+        for _ in range(40):
+            for h in honest:
+                await registries[AgentId(h)].gossip_round(contexts[AgentId(h)])  # type: ignore[arg-type]
+            await _drain(queue, registries, contexts)
+
+    asyncio.run(_drive())
+
+    equivocator_ids = {AgentId(e) for e in equivocators}
+    honest_ids = {AgentId(h) for h in honest}
+    for h in honest:
+        reg = registries[AgentId(h)]
+        caught = {pid for pid, _v in reg.equivocations}
+        assert caught == equivocator_ids, (
+            f"{h} caught {sorted(map(str, caught))}, expected every equivocator "
+            f"{sorted(map(str, equivocator_ids))} -- a stranded node did not detect the conflict"
+        )
+        snap = reg.view_snapshot()
+        still_held = sorted(str(a) for a in equivocator_ids & snap.keys())
+        assert not still_held, (
+            f"{h} still holds equivocated card(s) {still_held} "
+            f"-- stranded (eviction halted relay before the conflict reached it)"
+        )
+        # No honest publisher was falsely quarantined, and every honest card
+        # converged into this node's view.
+        assert not (caught & honest_ids), f"{h} falsely quarantined an honest publisher: {caught}"
+        assert honest_ids <= snap.keys(), f"{h} is missing honest cards after convergence"
+
+
+_TestWrite = tuple[AgentCard, _WriteTag, bool]
+
+
+def _proof_payload(entries: list[tuple[AgentId, _TestWrite, _TestWrite]]) -> bytes:
+    """Hand-encode an ``OP_EQPROOF`` wire payload -- mirrors ``byzantine_gossip._encode_proofs``.
+
+    Example::
+
+        payload = _proof_payload([(AgentId("e"), write_a, write_b)])
+    """
+
+    def _write(entry: _TestWrite) -> dict[str, object]:
+        card, tag, tombstone = entry
+        return {
+            "card": card.model_dump(mode="json"),
+            "version": tag.version,
+            "publisher": str(tag.publisher_id),
+            "tombstone": tombstone,
+        }
+
+    obj = [
+        {"publisher": str(publisher), "writes": [_write(write_a), _write(write_b)]}
+        for publisher, write_a, write_b in entries
+    ]
+    body = json.dumps(obj, sort_keys=True, separators=(",", ":")).encode()
+    return GOSSIP_PREFIX + OP_EQPROOF + body
+
+
+def test_fabricated_equivocation_proof_does_not_frame_honest_publisher() -> None:
+    """A relay forges an equivocation proof for honest E -> E is NOT quarantined.
+
+    Anti-framing guard on the proof-gossip path. Honest publisher E signs
+    exactly ONE card at version 1 (it never equivocates). A relay M -- holding
+    no signing key for E -- tries to frame E by pushing an ``OP_EQPROOF`` whose
+    two writes are E's one real signed card plus a second, mutated card at the
+    same version (its signature no longer matches its tampered content). Since
+    ``_ingest_proof`` independently re-verifies BOTH signatures, the forged
+    side fails, the proof is rejected as ``REASON_BAD_PROOF``, and E is neither
+    quarantined nor recorded as an equivocator. A relay cannot manufacture a
+    valid conflicting-signature pair for E, so it cannot use the proof path to
+    poison an honest publisher's standing.
+    """
+    idents = _peered_identities("e", "b", "m")
+    net = GossipNetwork(agent_ids=[AgentId("e"), AgentId("b"), AgentId("m")])
+    reg_b = ByzantineGossipRegistry(AgentId("b"), net, idents["b"])
+
+    tag = _WriteTag(version=1, publisher_id=AgentId("e"))
+    real_card = _signed_card(idents["e"], AgentId("e"), 1, ["sell"])
+    # Fabricated second write: mutate the real card's content but keep its old
+    # signature, so it no longer verifies (a relay with no key for E cannot
+    # produce a genuine second signature).
+    forged_card = real_card.model_copy(update={"capabilities": ["buy"]})
+
+    payload = _proof_payload([(AgentId("e"), (real_card, tag, False), (forged_card, tag, False))])
+    result = asyncio.run(reg_b.handle_gossip(AgentId("m"), payload, _StubContext()))  # type: ignore[arg-type]
+
+    assert result is True
+    assert AgentId("e") not in reg_b._quarantined  # pyright: ignore[reportPrivateUsage]
+    assert reg_b.equivocations == []
+    assert reg_b._equivocation_proofs == {}  # pyright: ignore[reportPrivateUsage]
+    assert reg_b.rejections == [(AgentId("e"), "bad_equivocation_proof")]
+
+    # E's genuine single card still merges normally afterwards -- E was not
+    # poisoned by the framing attempt.
+    ok = asyncio.run(
+        reg_b.handle_gossip(AgentId("e"), _push_payload([(real_card, tag, False)]), _StubContext())  # type: ignore[arg-type]
+    )
+    assert ok is True
+    [seen] = asyncio.run(reg_b.lookup(Query()))
+    assert seen.agent_id == AgentId("e")
+    assert seen.capabilities == ["sell"]
 
 
 # ---------------------------------------------------------------------------
