@@ -78,36 +78,38 @@ if TYPE_CHECKING:
     from nest_core.layers.identity import Identity
     from nest_core.types import AgentCard, AgentId
 
-EquivocationView = dict["AgentId", dict["AgentId", tuple[int, bool, "str | None"]]]
+EquivocationView = dict["AgentId", dict["AgentId", tuple[int, "AgentId", bool, "str | None"]]]
 """Per-viewer view extended with a content fingerprint: ``{published_agent_id:
-(version, tombstone, content_hash)}``.
+(version, publisher_id, tombstone, content_hash)}``.
 
-``ViewSnapshot`` (``gossip_validators.py``) is ``(version, publisher_id,
-tombstone)`` -- it deliberately omits content, so two agents who each
+This is exactly the shape ``ByzantineGossipRegistry.content_view()`` returns,
+so a caller wires the validator with ``{viewer: reg.content_view()}`` --
+symmetric to how ``check_no_forged_card_in_view``/``check_no_eclipse`` take
+``{viewer: reg.view_snapshot()}``. It is ``view_snapshot()``'s ``(version,
+publisher_id, tombstone)`` tuple plus a fourth ``content_hash`` field:
+``view_snapshot()`` deliberately omits content, so two agents who each
 accepted a *different*, both validly-signed, card from an equivocating
 publisher at the identical ``(publisher, version)`` key would produce
-byte-identical ``ViewSnapshot`` tuples for that key even though their views
-actually disagree. ``content_hash`` closes that gap; it should be
-``hashlib.sha256(canonical_write_bytes(card, version,
-tombstone)).hexdigest()`` -- the same hash
-``ByzantineGossipRegistry._witness_write`` computes internally -- sourced
-from ``reg.lookup()`` for a live registry (tombstoned entries are not
-returned by ``lookup()``, a known gap noted on
-``check_no_equivocation_accepted``) or built by hand in tests.
+byte-identical three-tuples for that key even though their views actually
+disagree. ``content_hash`` closes that gap; it is the same
+``content_hash(card, version, tombstone)`` the plugin's witness map computes
+internally, obtained straight from ``reg.content_view()`` (which covers
+tombstoned entries too) rather than re-derived by the caller, or built by
+hand in tests.
 
 ``content_hash`` may be ``None`` when the caller knows an entry existed at
-that ``(publisher, version)`` key (e.g. a tombstone recorded outside
-``lookup()``) but could not recover its content to hash it. That is
-distinct from omitting the ``(publisher, version)`` key entirely (which
-means this viewer simply has no information about it at all, the normal
-and harmless state of a partial gossip view): a present-but-``None`` entry
-is evidence that *something* happened here whose content is unverifiable,
-and ``check_no_equivocation_accepted`` treats it accordingly -- it can
-never be silently folded into "no disagreement".
+that ``(publisher, version)`` key but could not recover its content to hash
+it (a plugin with no content accessor whose ``lookup()`` filters out a
+tombstoned side). That is distinct from omitting the ``(publisher,
+version)`` key entirely (which means this viewer simply has no information
+about it at all, the normal and harmless state of a partial gossip view): a
+present-but-``None`` entry is evidence that *something* happened here whose
+content is unverifiable, and ``check_no_equivocation_accepted`` treats it
+accordingly -- it can never be silently folded into "no disagreement".
 
 Example::
 
-    view: EquivocationView = {AgentId("b"): {AgentId("e"): (1, False, "abc123...")}}
+    view: EquivocationView = {AgentId("b"): {AgentId("e"): (1, AgentId("e"), False, "abc...")}}
 """
 
 
@@ -242,6 +244,15 @@ def check_no_equivocation_accepted(
     tuple is identical for two conflicting same-version writes and cannot
     reveal the disagreement on its own.
 
+    Both inputs come from the plugin's **public** interface: the ledger from
+    ``reg.equivocations`` and the view from ``reg.content_view()`` (a
+    per-entry content hash alongside the ``view_snapshot()`` fields). This is
+    a pure function over that public output -- exactly like
+    ``check_no_forged_card_in_view``/``check_no_eclipse`` over
+    ``view_snapshot()`` -- with no reach into privately-stashed plugin state,
+    no import of the private ``_WriteTag``, and no re-implementation of the
+    write codec to re-derive the hash.
+
     For every ``(publisher, version)`` key where two or more *distinct*
     content hashes appear across the honest agents' views -- proof the
     publisher equivocated and different nodes' last-writer-wins merges kept
@@ -273,22 +284,26 @@ def check_no_equivocation_accepted(
     moment a second, content-differing, verified write is seen by any
     agent.
 
-    Known limitation: tombstoned entries are not returned by ``lookup()``,
-    so a content hash sourced that way is only available for live entries;
-    an equivocation between a live card and a tombstone at the same version
-    is still caught by ``byzantine_gossip`` (the witness map hashes the full
-    write, tombstone included) but this validator can only see it if the
-    caller supplies a content hash for tombstoned entries too.
+    Sourcing the view from ``ByzantineGossipRegistry.content_view()`` covers
+    tombstoned entries too (it reads the local view directly, not ``lookup()``,
+    which filters tombstones), so an equivocation between a live card and a
+    tombstone at the same version -- which ``byzantine_gossip``'s witness map
+    already hashes the full write for -- is representable in the evidence. A
+    caller that instead hand-builds the view from a plugin with no such
+    accessor (``lookup()`` only) may not recover a tombstoned side's hash; it
+    supplies ``content_hash=None`` for it, which this validator treats as
+    unverifiable (never a silent pass), not as absence.
 
     Example::
 
+        views = {aid: reg.content_view() for aid, reg in registries.items()}
         report = check_no_equivocation_accepted(ledgers, views)
         assert report.passed, report.detail
     """
     disagreements: dict[tuple[str, int], set[str]] = defaultdict(set)
     unverifiable_keys: set[tuple[str, int]] = set()
     for snapshot in views.values():
-        for publisher_id, (version, _tombstone, content_hash) in snapshot.items():
+        for _agent_id, (version, publisher_id, _tombstone, content_hash) in snapshot.items():
             key = (str(publisher_id), version)
             if content_hash is None:
                 unverifiable_keys.add(key)

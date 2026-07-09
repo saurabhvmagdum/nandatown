@@ -31,7 +31,7 @@ from nest_plugins_reference.registry.byzantine_gossip import (
     REASON_BAD_SIGNATURE,
     REASON_MISSING_SIGNATURE,
     REASON_SIGNER_MISMATCH,
-    canonical_write_bytes,
+    content_hash,
 )
 from nest_plugins_reference.validators.registry_byzantine_validators import (
     EquivocationView,
@@ -125,6 +125,16 @@ async def _equivocation_views(
 ) -> EquivocationView:
     """Build the content-aware ``EquivocationView`` shape from live registries.
 
+    ``byzantine_gossip`` exposes the content hash directly via its public
+    ``content_view()`` accessor, so its evidence is a single public call with
+    no re-derivation (the clean drop-in the equivocation validator now enjoys,
+    symmetric to the ``view_snapshot()`` the other two validators consume). The
+    reference ``gossip`` plugin has no such accessor (by design -- it is the
+    negative control, lacking both the ledger and the content view), so its
+    evidence is assembled from its public ``view_snapshot()``/``lookup()`` plus
+    the plugin module's public ``content_hash()`` helper -- still no private
+    state, no ``_WriteTag``, no re-implemented codec.
+
     Example::
 
         views = await _equivocation_views(registries, honest_ids)
@@ -132,17 +142,20 @@ async def _equivocation_views(
     out: EquivocationView = {}
     for aid in honest_ids:
         reg = registries[aid]
-        snapshot = reg.view_snapshot()
-        cards_by_id = {c.agent_id: c for c in await reg.lookup(Query())}
-        per_viewer: dict[AgentId, tuple[int, bool, str | None]] = {}
-        for publisher_id, (version, _writer, tombstone) in snapshot.items():
-            card = cards_by_id.get(publisher_id)
-            if card is None:
-                continue  # tombstoned/absent; not exercised by this scenario
-            content_hash = hashlib.sha256(
-                canonical_write_bytes(card, version, tombstone)
-            ).hexdigest()
-            per_viewer[publisher_id] = (version, tombstone, content_hash)
+        per_viewer: dict[AgentId, tuple[int, AgentId, bool, str | None]] = {}
+        content_view = getattr(reg, "content_view", None)
+        if content_view is not None:
+            for pub_id, (version, writer, tombstone, chash) in content_view().items():
+                per_viewer[pub_id] = (version, writer, tombstone, chash)
+        else:
+            snapshot = reg.view_snapshot()
+            cards_by_id = {c.agent_id: c for c in await reg.lookup(Query())}
+            for pub_id, (version, writer, tombstone) in snapshot.items():
+                card = cards_by_id.get(pub_id)
+                if card is None:
+                    continue  # tombstoned/absent; not exercised by this scenario
+                chash = content_hash(card, version, tombstone)
+                per_viewer[pub_id] = (version, writer, tombstone, chash)
         out[aid] = per_viewer
     return out
 

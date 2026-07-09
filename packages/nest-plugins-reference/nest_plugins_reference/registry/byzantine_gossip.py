@@ -603,6 +603,46 @@ class ByzantineGossipRegistry:
             for aid, v in sorted(self._view.items())
         }
 
+    def content_view(self) -> dict[AgentId, tuple[int, AgentId, bool, str]]:
+        """Return a deterministic **content-aware** snapshot of the local view.
+
+        Extends ``view_snapshot()``'s ``(version, publisher_id, tombstone)``
+        tuple with a fourth field — ``content_hash(card, version, tombstone)``,
+        the SAME per-write fingerprint the witness map (``_witness_write``) and
+        the gossip digest (``_digest``) compute — sourced straight from the
+        stored view rather than re-derived by the caller. This is the public
+        evidence ``check_no_equivocation_accepted`` consumes: two conflicting
+        writes an equivocating publisher signed at the same
+        ``(publisher, version)`` key produce byte-identical ``view_snapshot()``
+        tuples (that is what equivocation *is*), so only the ``content_hash``
+        reveals the disagreement. Exposing it as a public accessor lets that
+        validator stay a pure function over public output — no reach into
+        ``_seen``/``_first_write``, no import of the private ``_WriteTag``, no
+        re-implementation of the write codec.
+
+        Unlike ``lookup()`` (which filters tombstones out), this covers **every**
+        entry in the local view, tombstoned ones included — so a
+        live-card-vs-tombstone equivocation at the same version is representable
+        here (the two writes hash differently), closing the tombstone gap a
+        ``lookup()``-sourced hash would otherwise leave. ``view_snapshot()``'s
+        three-tuple shape is deliberately left unchanged (``check_converged``
+        and other callers depend on it); this is an **additive** accessor.
+
+        Example::
+
+            cview = reg.content_view()
+            # {AgentId("e"): (1, AgentId("e"), False, "abc123...")}
+        """
+        return {
+            aid: (
+                v.tag.version,
+                v.tag.publisher_id,
+                v.tombstone,
+                content_hash(v.card, v.tag.version, v.tombstone),
+            )
+            for aid, v in sorted(self._view.items())
+        }
+
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------

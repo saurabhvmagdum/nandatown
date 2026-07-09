@@ -138,8 +138,8 @@ def test_equivocation_validator_fails_against_reference_style_silent_split() -> 
     """
     ledgers: dict[AgentId, list[tuple[AgentId, int]]] = {AgentId("a"): [], AgentId("c"): []}
     views: EquivocationView = {
-        AgentId("a"): {AgentId("e"): (1, False, "hash-of-card-1")},
-        AgentId("c"): {AgentId("e"): (1, False, "hash-of-card-2")},
+        AgentId("a"): {AgentId("e"): (1, AgentId("e"), False, "hash-of-card-1")},
+        AgentId("c"): {AgentId("e"): (1, AgentId("e"), False, "hash-of-card-2")},
     }
 
     report = check_no_equivocation_accepted(equivocation_ledgers=ledgers, views=views)
@@ -164,9 +164,9 @@ def test_equivocation_validator_passes_against_byzantine_style_quarantine() -> N
         AgentId("c"): [],
     }
     views: EquivocationView = {
-        AgentId("a"): {AgentId("e"): (1, False, "hash-of-card-1")},
+        AgentId("a"): {AgentId("e"): (1, AgentId("e"), False, "hash-of-card-1")},
         AgentId("b"): {},  # evicted on quarantine
-        AgentId("c"): {AgentId("e"): (1, False, "hash-of-card-2")},
+        AgentId("c"): {AgentId("e"): (1, AgentId("e"), False, "hash-of-card-2")},
     }
 
     report = check_no_equivocation_accepted(equivocation_ledgers=ledgers, views=views)
@@ -195,7 +195,8 @@ def test_equivocation_validator_fails_on_masked_one_sided_split() -> None:
     ledgers: dict[AgentId, list[tuple[AgentId, int]]] = {AgentId("a"): [], AgentId("b"): []}
     views: EquivocationView = {
         AgentId("a"): {},  # the conflicting side: evicted, no trace left anywhere
-        AgentId("b"): {AgentId("e"): (1, True, None)},  # tombstoned, hash unrecoverable
+        # tombstoned, hash unrecoverable:
+        AgentId("b"): {AgentId("e"): (1, AgentId("e"), True, None)},
     }
 
     report = check_no_equivocation_accepted(equivocation_ledgers=ledgers, views=views)
@@ -209,8 +210,8 @@ def test_equivocation_validator_passes_when_no_disagreement_exists() -> None:
     """No-false-positive: honest multi-write history at distinct versions is not equivocation."""
     ledgers: dict[AgentId, list[tuple[AgentId, int]]] = {AgentId("a"): [], AgentId("b"): []}
     views: EquivocationView = {
-        AgentId("a"): {AgentId("e"): (2, False, "hash-of-card-2")},
-        AgentId("b"): {AgentId("e"): (2, False, "hash-of-card-2")},
+        AgentId("a"): {AgentId("e"): (2, AgentId("e"), False, "hash-of-card-2")},
+        AgentId("b"): {AgentId("e"): (2, AgentId("e"), False, "hash-of-card-2")},
     }
 
     report = check_no_equivocation_accepted(equivocation_ledgers=ledgers, views=views)

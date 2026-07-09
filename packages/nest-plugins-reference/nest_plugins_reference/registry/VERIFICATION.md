@@ -338,14 +338,23 @@ the test was written to *document* it (e.g.
    equivocation *is*. The validator requires the richer `EquivocationView`
    shape (adds a `content_hash` per entry); a caller wiring it from
    `view_snapshot()` alone gets a validator that can never detect anything.
-   - **Tombstone gap:** `content_hash` sourced via `reg.lookup()` (as the
-     scenario gate does) is only available for live entries, since
-     `lookup()` filters tombstones out. `byzantine_gossip`'s own witness
-     map still catches a live-card-vs-tombstone equivocation internally (it
-     hashes the full write, tombstone included) -- but a caller building
-     `EquivocationView` purely from `lookup()` output would miss supplying
-     a hash for the tombstoned side and could show a false negative in that
-     specific sub-case. Not exercised by the three demo scenarios.
+   `byzantine_gossip` therefore exposes a public `content_view()` accessor
+   (`view_snapshot()`'s fields plus the per-entry `content_hash` the witness
+   map already computes), so the validator is a clean drop-in over public
+   output -- `{viewer: reg.content_view()}`, symmetric to the
+   `{viewer: reg.view_snapshot()}` the other two validators take -- with no
+   reach into private plugin state, no `_WriteTag` import, and no re-derived
+   hash. It stays a pure function; only the accessor was added.
+   - **Tombstone gap (closed for `byzantine_gossip`):** `content_view()`
+     reads the local view directly rather than `lookup()`, so it covers
+     tombstoned entries too -- a live-card-vs-tombstone equivocation at the
+     same version is representable (the two writes hash differently), and
+     `byzantine_gossip`'s witness map catches it internally regardless. A
+     caller hand-building `EquivocationView` from a plugin that offers only
+     `lookup()` still cannot recover a tombstoned side's hash; it supplies
+     `content_hash=None`, which the validator treats as unverifiable (a FAIL,
+     never a silent pass) rather than as absence. Not exercised by the three
+     demo scenarios.
 8. **`check_no_forged_card_in_view`'s `cards` parameter assumes one
    physical card instance circulates per agent id.** If an adversary
    crafted *different* forged cards for different specific viewers (rather
