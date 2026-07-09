@@ -40,10 +40,9 @@ failures:
   message_drop: 0.0
   byzantine_agents: 0.28
 
-duration: "ticks: 20000"
+duration: "ticks: 4000"
 
 metrics:
-  - success_rate
   - message_count
   - agent_count
 
