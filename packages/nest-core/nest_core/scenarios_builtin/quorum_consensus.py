@@ -26,10 +26,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from nest_plugins_reference.coordination.quorum import Quorum
+
 from nest_core.scenario import ScenarioConfig
 from nest_core.sim.agent import AgentContext, StateMachineAgent
 from nest_core.types import AgentId
-from nest_plugins_reference.coordination.quorum import Quorum
 
 
 class QuorumLeaderAgent(StateMachineAgent):

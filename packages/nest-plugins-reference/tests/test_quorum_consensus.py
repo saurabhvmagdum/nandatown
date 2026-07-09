@@ -12,9 +12,9 @@ Covers:
 
 from __future__ import annotations
 
-import pytest
 from typing import Any
 
+import pytest
 from nest_core.types import AgentId, Task
 from nest_plugins_reference.coordination.quorum import Quorum
 from nest_plugins_reference.coordination.quorum_consensus import QuorumConsensus
@@ -24,7 +24,6 @@ from nest_plugins_reference.validators.bft_validators import (
     check_no_forged_quorum,
     check_no_stuck_view,
 )
-
 
 # ──────────────────────────────────────────────────────────
 # 6.1 Unit Tests — BFT Quorum Math
@@ -361,7 +360,7 @@ class TestScenarioFactory:
             quorum_consensus_factory,
         )
 
-        config = ScenarioConfig.from_yaml("scenarios/bft_consensus_byzantine.yaml")
+        config = ScenarioConfig.from_yaml("scenarios/quorum_byzantine.yaml")
         agents = quorum_consensus_factory(config, {})
 
         # 7 agents: 1 leader + 6 followers, 28% byzantine => 1 byzantine

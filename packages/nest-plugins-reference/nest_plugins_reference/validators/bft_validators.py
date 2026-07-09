@@ -38,7 +38,7 @@ from __future__ import annotations
 import contextlib
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 
 @dataclass
@@ -53,7 +53,7 @@ class BftValidatorReport:
 
     passed: bool
     detail: str
-    evidence: dict[str, Any] = field(default_factory=dict)
+    evidence: dict[str, Any] = field(default_factory=lambda: cast(dict[str, Any], {}))
 
 
 class BftValidationError(AssertionError):
