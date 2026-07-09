@@ -27,12 +27,9 @@ Example::
 
 from __future__ import annotations
 
-from typing import Any
-
 from nest_core.types import (
     AgentId,
     Bid,
-    Money,
     Outcome,
     Round,
     Task,
@@ -170,9 +167,7 @@ class QuorumConsensus:
         accept_count = sum(1 for v in genuine_votes if v.get("value") == "accept")
         unique_genuine_voters = {str(v.get("voter", "")) for v in genuine_votes}
 
-        quorum_reached = (
-            len(unique_genuine_voters) >= threshold and accept_count >= threshold
-        )
+        quorum_reached = len(unique_genuine_voters) >= threshold and accept_count >= threshold
         winner = round.participants[0] if (quorum_reached and round.participants) else None
 
         round.metadata["phase"] = "decided"

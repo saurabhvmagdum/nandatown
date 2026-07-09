@@ -26,11 +26,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from nest_plugins_reference.coordination.quorum import Quorum
+
 from nest_core.scenario import ScenarioConfig
 from nest_core.sim.agent import AgentContext, StateMachineAgent
 from nest_core.types import AgentId
-
-from nest_plugins_reference.coordination.quorum import Quorum
 
 
 class QuorumLeaderAgent(StateMachineAgent):
@@ -73,9 +73,7 @@ class QuorumLeaderAgent(StateMachineAgent):
             follower = AgentId(f"follower-{i}")
             await ctx.send(follower, f"propose:{rnd_str}:{value}".encode())
 
-    async def on_message(
-        self, ctx: AgentContext, sender: AgentId, payload: bytes
-    ) -> None:
+    async def on_message(self, ctx: AgentContext, sender: AgentId, payload: bytes) -> None:
         """Collect votes; when all followers have voted, check BFT quorum.
 
         Detects equivocation (same voter sending conflicting votes) and
@@ -142,9 +140,7 @@ class QuorumLeaderAgent(StateMachineAgent):
             self._proposed_values[new_rnd] = new_value
             for i in range(self._num_followers):
                 follower = AgentId(f"follower-{i}")
-                await ctx.send(
-                    follower, f"propose:{new_rnd}:{new_value}".encode()
-                )
+                await ctx.send(follower, f"propose:{new_rnd}:{new_value}".encode())
 
 
 class QuorumFollowerAgent(StateMachineAgent):
@@ -170,9 +166,7 @@ class QuorumFollowerAgent(StateMachineAgent):
         self._leader = leader
         self._accept_probability = accept_probability
 
-    async def on_message(
-        self, ctx: AgentContext, sender: AgentId, payload: bytes
-    ) -> None:
+    async def on_message(self, ctx: AgentContext, sender: AgentId, payload: bytes) -> None:
         """Receive a proposal and respond with a single consistent vote."""
         msg = payload.decode("utf-8", errors="replace")
         if not msg.startswith("propose:"):
@@ -209,9 +203,7 @@ class ByzantineFollowerAgent(StateMachineAgent):
         self._id = agent_id
         self._leader = leader
 
-    async def on_message(
-        self, ctx: AgentContext, sender: AgentId, payload: bytes
-    ) -> None:
+    async def on_message(self, ctx: AgentContext, sender: AgentId, payload: bytes) -> None:
         """Receive a proposal and send conflicting votes (equivocation)."""
         msg = payload.decode("utf-8", errors="replace")
         if not msg.startswith("propose:"):
