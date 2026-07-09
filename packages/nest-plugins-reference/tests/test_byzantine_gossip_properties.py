@@ -310,7 +310,12 @@ async def _deliver(h: _Harness, target: AgentId, sender: AgentId, payload: bytes
 
 
 class _AttackKind(StrEnum):
-    """Enumerates the forged/impersonated/replayed push-entry shapes property 1 generates."""
+    """Enumerates the forged/impersonated/replayed push-entry shapes property 1 generates.
+
+    Example::
+
+        kind = _AttackKind.GARBAGE_SIGNATURE
+    """
 
     MISSING_SIGNATURE = "missing_signature"
     SIGNER_MISMATCH = "signer_mismatch"
@@ -420,7 +425,7 @@ def _materialize_attack(
 
 
 @given(attacks=_attack_specs_strategy)
-@settings(max_examples=30, deadline=None)
+@settings(max_examples=60, deadline=None)
 def test_property_forged_never_accepted(attacks: list[tuple[_AttackKind, int]]) -> None:
     """No honest view ever contains a card whose signature doesn't verify.
 
@@ -491,7 +496,7 @@ _op_strategy = st.lists(
 
 
 @given(ops=_op_strategy)
-@settings(max_examples=30, deadline=None)
+@settings(max_examples=60, deadline=None)
 def test_property_honest_subnetwork_converges(ops: list[tuple[int, str, list[str]]]) -> None:
     """Any honest write interleaving converges to one identical snapshot within K rounds.
 
@@ -535,7 +540,7 @@ _equivocation_flags_strategy = st.lists(st.booleans(), min_size=4, max_size=4)
 
 
 @given(equivocating=_equivocation_flags_strategy)
-@settings(max_examples=30, deadline=None)
+@settings(max_examples=60, deadline=None)
 def test_property_equivocation_always_caught_no_false_positive(equivocating: list[bool]) -> None:
     """Every equivocating publisher is quarantined + never in an honest view; honest ones are not.
 
@@ -597,7 +602,7 @@ def test_property_equivocation_always_caught_no_false_positive(equivocating: lis
 
 
 @given(attacks=_attack_specs_strategy, equivocating=_equivocation_flags_strategy)
-@settings(max_examples=20, deadline=None)
+@settings(max_examples=60, deadline=None)
 def test_property_determinism_same_seed_same_ops(
     attacks: list[tuple[_AttackKind, int]], equivocating: list[bool]
 ) -> None:
@@ -701,7 +706,16 @@ def _byzantine_fractions(n: int) -> list[int]:
 
 
 def _byzantine_indices(n: int, f: int) -> set[int]:
-    """``f`` indices spread roughly evenly across ``range(n)``.
+    """``f`` distinct indices spread roughly evenly across ``range(n)``.
+
+    Asserts the result has exactly ``f`` members: ``{int(i * step) for i in
+    range(f)}`` silently collapses to FEWER than ``f`` distinct indices if
+    ``step = n / f`` is small enough that two different ``i`` truncate to the
+    same ``int(i * step)`` -- which would under-represent the byzantine
+    fraction the caller asked for instead of failing loudly. That can only
+    happen if ``_SWEEP_N`` (currently 9) is ever reduced relative to the
+    ``f`` values ``_byzantine_fractions`` produces; this assertion is a
+    tripwire for that future change.
 
     Example::
 
@@ -710,7 +724,12 @@ def _byzantine_indices(n: int, f: int) -> set[int]:
     if f <= 0:
         return set()
     step = n / f
-    return {int(i * step) for i in range(f)}
+    result = {int(i * step) for i in range(f)}
+    assert len(result) == f, (
+        f"_byzantine_indices(n={n}, f={f}) collapsed to {len(result)} distinct "
+        f"indices {result}, expected {f}; _SWEEP_N is too small for this f"
+    )
+    return result
 
 
 def _byzantine_bad_entries(
