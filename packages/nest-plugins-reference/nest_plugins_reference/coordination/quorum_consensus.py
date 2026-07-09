@@ -27,12 +27,9 @@ Example::
 
 from __future__ import annotations
 
-from typing import Any
-
 from nest_core.types import (
     AgentId,
     Bid,
-    Money,
     Outcome,
     Round,
     Task,

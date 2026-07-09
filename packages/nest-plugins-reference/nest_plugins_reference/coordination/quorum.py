@@ -24,6 +24,9 @@ Example::
 """
 
 
+from typing import Any
+
+
 class Quorum:
     """Utility class for BFT quorum threshold computation and validation.
 
@@ -70,7 +73,7 @@ class Quorum:
         return 2 * f + 1
 
     @staticmethod
-    def is_quorum(votes: list, total_nodes: int) -> bool:
+    def is_quorum(votes: list[Any], total_nodes: int) -> bool:
         """Check if a list of unique votes meets the quorum threshold.
 
         Deduplicates votes before counting, so duplicate sender IDs

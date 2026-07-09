@@ -35,6 +35,7 @@ Example::
 
 from __future__ import annotations
 
+import contextlib
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
@@ -52,7 +53,7 @@ class BftValidatorReport:
 
     passed: bool
     detail: str
-    evidence: dict[str, object] = field(default_factory=dict)
+    evidence: dict[str, Any] = field(default_factory=dict)
 
 
 class BftValidationError(AssertionError):
@@ -277,17 +278,13 @@ def check_no_stuck_view(
         if msg.startswith("propose:"):
             parts = msg.split(":")
             if len(parts) >= 2:
-                try:
+                with contextlib.suppress(ValueError):
                     proposed_rounds.add(int(parts[1]))
-                except ValueError:
-                    pass
         elif msg.startswith("result:"):
             parts = msg.split(":")
             if len(parts) >= 3 and parts[2] == "committed":
-                try:
+                with contextlib.suppress(ValueError):
                     committed_rounds.add(int(parts[1]))
-                except ValueError:
-                    pass
 
     if not proposed_rounds:
         return BftValidatorReport(

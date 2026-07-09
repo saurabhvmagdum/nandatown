@@ -13,7 +13,9 @@ Covers:
 from __future__ import annotations
 
 import pytest
+from typing import Any
 
+from nest_core.types import AgentId, Task
 from nest_plugins_reference.coordination.quorum import Quorum
 from nest_plugins_reference.coordination.quorum_consensus import QuorumConsensus
 from nest_plugins_reference.validators.bft_validators import (
@@ -22,8 +24,6 @@ from nest_plugins_reference.validators.bft_validators import (
     check_no_forged_quorum,
     check_no_stuck_view,
 )
-
-from nest_core.types import AgentId, Task
 
 
 # ──────────────────────────────────────────────────────────
@@ -142,6 +142,8 @@ class TestQuorumConsensusPlugin:
         rnd = await coord.propose(task)
 
         vote = await coord.participate(rnd)
+        from nest_core.types import Vote
+        assert isinstance(vote, Vote)
         assert vote.value == "accept"
         assert len(rnd.metadata["votes"]) == 1
         assert rnd.metadata["votes"][0]["voter"] == "a1"
@@ -235,13 +237,13 @@ class TestQuorumConsensusPlugin:
 class TestBftValidators:
     """Test the four BFT adversarial validators."""
 
-    def _make_send_event(self, agent: str, target: str, msg: str) -> dict:
+    def _make_send_event(self, agent: str, target: str, msg: str) -> dict[str, Any]:
         """Helper to create a trace send event."""
         return {"kind": "send", "agent": agent, "target": target, "msg": msg}
 
     def test_no_conflicting_commits_passes(self):
         """No conflicts — same value committed in each round."""
-        events = [
+        events: list[dict[str, Any]] = [
             self._make_send_event("leader", "f0", "result:1:committed:3/4:42"),
             self._make_send_event("leader", "f1", "result:1:committed:3/4:42"),
             self._make_send_event("leader", "f2", "result:2:committed:3/4:99"),
@@ -251,7 +253,7 @@ class TestBftValidators:
 
     def test_no_conflicting_commits_fails(self):
         """Conflict — different values committed in the same round."""
-        events = [
+        events: list[dict[str, Any]] = [
             self._make_send_event("leader", "f0", "result:1:committed:3/4:42"),
             self._make_send_event("leader", "f1", "result:1:committed:3/4:99"),
         ]
@@ -261,7 +263,7 @@ class TestBftValidators:
 
     def test_no_equivocation_passes(self):
         """Leader proposes the same value to all followers."""
-        events = [
+        events: list[dict[str, Any]] = [
             self._make_send_event("leader", "f0", "propose:1:42"),
             self._make_send_event("leader", "f1", "propose:1:42"),
             self._make_send_event("leader", "f2", "propose:1:42"),
@@ -271,7 +273,7 @@ class TestBftValidators:
 
     def test_no_equivocation_fails(self):
         """Leader proposes different values to different followers."""
-        events = [
+        events: list[dict[str, Any]] = [
             self._make_send_event("leader", "f0", "propose:1:42"),
             self._make_send_event("leader", "f1", "propose:1:99"),
         ]
@@ -281,7 +283,7 @@ class TestBftValidators:
 
     def test_no_forged_quorum_passes(self):
         """Committed round backed by enough distinct votes (n=4, f=1, threshold=3)."""
-        events = [
+        events: list[dict[str, Any]] = [
             self._make_send_event("f0", "leader", "vote:1:accept"),
             self._make_send_event("f1", "leader", "vote:1:accept"),
             self._make_send_event("f2", "leader", "vote:1:accept"),
@@ -292,7 +294,7 @@ class TestBftValidators:
 
     def test_no_forged_quorum_fails(self):
         """Committed round with only 1 vote (n=4, threshold=3) — forged."""
-        events = [
+        events: list[dict[str, Any]] = [
             self._make_send_event("f0", "leader", "vote:1:accept"),
             self._make_send_event("leader", "f0", "result:1:committed:1/1:42"),
         ]
@@ -302,7 +304,7 @@ class TestBftValidators:
 
     def test_no_stuck_view_passes(self):
         """Commits happen regularly within the threshold."""
-        events = [
+        events: list[dict[str, Any]] = [
             self._make_send_event("leader", "f0", "propose:1:42"),
             self._make_send_event("leader", "f0", "result:1:committed:3/4:42"),
             self._make_send_event("leader", "f0", "propose:2:99"),
@@ -313,7 +315,7 @@ class TestBftValidators:
 
     def test_no_stuck_view_fails_no_commits(self):
         """Many rounds proposed but no commits — stuck."""
-        events = [
+        events: list[dict[str, Any]] = [
             self._make_send_event("leader", "f0", f"propose:{i}:42")
             for i in range(1, 20)
         ]
@@ -322,7 +324,7 @@ class TestBftValidators:
 
     def test_no_stuck_view_passes_few_rounds(self):
         """Few rounds proposed, no commits — below threshold."""
-        events = [
+        events: list[dict[str, Any]] = [
             self._make_send_event("leader", "f0", "propose:1:42"),
             self._make_send_event("leader", "f0", "propose:2:42"),
         ]
@@ -340,8 +342,8 @@ class TestScenarioFactory:
 
     def test_factory_creates_agents(self):
         """Factory should create leader + follower agents."""
-        from nest_core.scenarios_builtin.quorum_consensus import quorum_consensus_factory
         from nest_core.scenario import ScenarioConfig
+        from nest_core.scenarios_builtin.quorum_consensus import quorum_consensus_factory
 
         config = ScenarioConfig.from_yaml("scenarios/quorum_baseline.yaml")
         agents = quorum_consensus_factory(config, {})
@@ -353,11 +355,11 @@ class TestScenarioFactory:
 
     def test_factory_creates_byzantine_agents(self):
         """Factory with byzantine_agents should create ByzantineFollowerAgents."""
-        from nest_core.scenarios_builtin.quorum_consensus import (
-            quorum_consensus_factory,
-            ByzantineFollowerAgent,
-        )
         from nest_core.scenario import ScenarioConfig
+        from nest_core.scenarios_builtin.quorum_consensus import (
+            ByzantineFollowerAgent,
+            quorum_consensus_factory,
+        )
 
         config = ScenarioConfig.from_yaml("scenarios/bft_consensus_byzantine.yaml")
         agents = quorum_consensus_factory(config, {})
