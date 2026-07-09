@@ -11,6 +11,10 @@ Example::
     from nest_plugins_reference.validators import (
         check_no_cross_partition_leak,
         check_converged,
+        check_no_conflicting_commits,
+        check_no_equivocation,
+        check_no_forged_quorum,
+        check_no_stuck_view,
     )
 """
 
@@ -31,6 +35,15 @@ from nest_plugins_reference.validators.privacy_validators import (
     corrupt_proof,
 )
 
+from nest_plugins_reference.validators.bft_validators import (
+    BftValidationError,
+    BftValidatorReport,
+    check_no_conflicting_commits,
+    check_no_equivocation,
+    check_no_forged_quorum,
+    check_no_stuck_view,
+)
+
 __all__ = [
     "ConvergenceFailureError",
     "PartitionLeakError",
@@ -39,7 +52,11 @@ __all__ = [
     "check_eavesdropper_blocked",
     "check_field_injection_rejected",
     "check_no_partition_view_leak",
-    "check_replay_rejected",
-    "check_stale_revocation_blocked",
-    "corrupt_proof",
+    "BftValidationError",
+    "BftValidatorReport",
+    "check_no_conflicting_commits",
+    "check_no_equivocation",
+    "check_no_forged_quorum",
+    "check_no_stuck_view",
 ]
+

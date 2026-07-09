@@ -1,19 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
-# BFT consensus with Byzantine agents: 7 agents, 2 Byzantine (f=2).
+# Quorum consensus stress test: 50 agents, no failures.
 name: quorum_consensus
-description: "7 agents with 2 Byzantine (28%) — safety must hold."
+description: "1 leader and 49 followers reaching agreement via 2/3 quorum voting at scale."
 
 tier: 1
 seed: 42
 
 agents:
-  count: 7
+  count: 50
   brain: state-machine
   roles:
     - name: leader
       count: 1
     - name: follower
-      count: 6
+      count: 49
 
 layers:
   transport: in_memory
@@ -38,13 +38,13 @@ task:
 
 failures:
   message_drop: 0.0
-  byzantine_agents: 0.28
 
-duration: "ticks: 4000"
+duration: "ticks: 50000"
 
 metrics:
+  - success_rate
   - message_count
   - agent_count
 
 output:
-  trace: ./traces/bft_consensus_byzantine.jsonl
+  trace: ./traces/quorum_stress.jsonl

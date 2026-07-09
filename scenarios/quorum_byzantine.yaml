@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-# BFT consensus with Byzantine agents: 7 agents, 2 Byzantine (f=2).
+# Quorum consensus with Byzantine (malicious) agents — BFT 3f+1 configuration.
 name: quorum_consensus
-description: "7 agents with 2 Byzantine (28%) — safety must hold."
+description: "1 leader and 6 followers with 2 Byzantine agents (f=2, n=3f+1=7)."
 
 tier: 1
 seed: 42
@@ -40,11 +40,13 @@ failures:
   message_drop: 0.0
   byzantine_agents: 0.28
 
-duration: "ticks: 4000"
+duration: "ticks: 20000"
 
 metrics:
+  - success_rate
   - message_count
   - agent_count
 
 output:
-  trace: ./traces/bft_consensus_byzantine.jsonl
+  trace: ./traces/quorum_byzantine.jsonl
+
