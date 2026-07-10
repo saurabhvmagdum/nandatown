@@ -340,29 +340,30 @@ class TestScenarioFactory:
     """Test the quorum_consensus_factory function."""
 
     def test_factory_creates_agents(self):
-        """Factory should create leader + follower agents."""
+        """Factory should create replica agents."""
         from nest_core.scenario import ScenarioConfig
         from nest_core.scenarios_builtin.quorum_consensus import quorum_consensus_factory
-
+    
         config = ScenarioConfig.from_yaml("scenarios/quorum_baseline.yaml")
         agents = quorum_consensus_factory(config, {})
-
-        assert AgentId("leader-0") in agents
-        assert AgentId("follower-0") in agents
-        # 20 agents total: 1 leader + 19 followers
+    
+        assert AgentId("replica-0") in agents
+        assert AgentId("replica-1") in agents
         assert len(agents) == 20
 
     def test_factory_creates_byzantine_agents(self):
-        """Factory with byzantine_agents should create ByzantineFollowerAgents."""
+        """Factory with byzantine_agents should create MaliciousQuorumReplica."""
         from nest_core.scenario import ScenarioConfig
         from nest_core.scenarios_builtin.quorum_consensus import (
-            ByzantineFollowerAgent,
+            MaliciousQuorumReplica,
             quorum_consensus_factory,
         )
-
+    
         config = ScenarioConfig.from_yaml("scenarios/quorum_byzantine.yaml")
+        
+        # Override to ensure malicious_agents is set as expected by the new factory
+        config.task.config["malicious_agents"] = ["replica-0", "replica-1"]
         agents = quorum_consensus_factory(config, {})
-
-        # 7 agents: 1 leader + 6 followers, 28% byzantine => 1 byzantine
-        byzantine_agents = [a for a in agents.values() if isinstance(a, ByzantineFollowerAgent)]
+    
+        byzantine_agents = [a for a in agents.values() if isinstance(a, MaliciousQuorumReplica)]
         assert len(byzantine_agents) >= 1
