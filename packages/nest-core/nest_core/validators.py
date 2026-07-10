@@ -4707,3 +4707,20 @@ VALIDATORS: dict[str, list[Any]] = {
         validate_rogue_trusted_agent_reputation,
     ],
 }
+
+try:
+    from nest_plugins_reference.validators.saurabhvmagdum_bft_quorum_validators import (
+        validate_no_conflicting_commits,
+        validate_no_equivocation_in_certificate,
+        validate_no_forged_quorum,
+        validate_no_stuck_view,
+    )
+
+    VALIDATORS["saurabhvmagdum_bft_quorum"] = [
+        validate_no_conflicting_commits,
+        validate_no_equivocation_in_certificate,
+        validate_no_forged_quorum,
+        validate_no_stuck_view,
+    ]
+except ImportError:
+    pass

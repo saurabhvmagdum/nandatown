@@ -45,6 +45,10 @@ hybrid_x25519 = "nest_plugins_reference.privacy.hybrid_x25519:HybridX25519Privac
 [project.entry-points."nest.plugins.datafacts"]
 cid_facts = "nest_plugins_reference.datafacts.cid_facts:CidFacts"
 
+[project.entry-points."nest.plugins.coordination"]
+saurabhvmagdum_bft_quorum = "nest_plugins_reference.coordination.quorum_bft:QuorumBFT"
+
+
 [project.entry-points."nest.plugins.failure_detector"]
 heartbeat = "nest_plugins_reference.failure_detection.heartbeat:HeartbeatFailureDetector"
 phi_accrual = "nest_plugins_reference.failure_detection.phi_accrual:PhiAccrualFailureDetector"

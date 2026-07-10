@@ -1,0 +1,34 @@
+name: saurabhvmagdum_bft_quorum_byzantine
+description: "BFT Quorum Consensus with 7 replicas, 2 byzantine."
+seed: 42
+
+agents:
+  count: 7
+  brain: state-machine
+  roles: []
+
+layers:
+  transport: in_memory
+  comms: nest_native
+  identity: did_key
+  registry: in_memory
+  auth: jwt
+  trust: score_average
+  payments: prepaid_credits
+  coordination: saurabhvmagdum_bft_quorum
+  negotiation: alternating_offers
+  memory: blackboard
+  privacy: noop
+  datafacts: datafacts_v1
+
+task:
+  type: quorum_consensus
+  config:
+    view_timeout_ticks: 40
+    malicious_agents: ["replica-1", "replica-2"]
+
+duration: "ticks: 200"
+
+metrics: []
+output:
+  trace: ./traces/saurabhvmagdum_bft_quorum_byzantine.jsonl
