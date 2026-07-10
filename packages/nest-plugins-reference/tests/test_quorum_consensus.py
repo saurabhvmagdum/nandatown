@@ -343,10 +343,10 @@ class TestScenarioFactory:
         """Factory should create replica agents."""
         from nest_core.scenario import ScenarioConfig
         from nest_core.scenarios_builtin.quorum_consensus import quorum_consensus_factory
-    
+
         config = ScenarioConfig.from_yaml("scenarios/quorum_baseline.yaml")
         agents = quorum_consensus_factory(config, {})
-    
+
         assert AgentId("replica-0") in agents
         assert AgentId("replica-1") in agents
         assert len(agents) == 20
@@ -358,12 +358,12 @@ class TestScenarioFactory:
             MaliciousQuorumReplica,
             quorum_consensus_factory,
         )
-    
+
         config = ScenarioConfig.from_yaml("scenarios/quorum_byzantine.yaml")
-        
+
         # Override to ensure malicious_agents is set as expected by the new factory
         config.task.config["malicious_agents"] = ["replica-0", "replica-1"]
         agents = quorum_consensus_factory(config, {})
-    
+
         byzantine_agents = [a for a in agents.values() if isinstance(a, MaliciousQuorumReplica)]
         assert len(byzantine_agents) >= 1

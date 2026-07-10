@@ -2,6 +2,7 @@
 """Baseline failure tests for BFT Quorum Validators."""
 
 from typing import Any
+
 from nest_plugins_reference.validators.saurabhvmagdum_bft_quorum_validators import (
     validate_no_conflicting_commits,
     validate_no_equivocation_in_certificate,

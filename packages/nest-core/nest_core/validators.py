@@ -4715,7 +4715,8 @@ try:
         validate_no_forged_quorum,
         validate_no_stuck_view,
     )
-    VALIDATORS['saurabhvmagdum_bft_quorum'] = [
+
+    VALIDATORS["saurabhvmagdum_bft_quorum"] = [
         validate_no_conflicting_commits,
         validate_no_equivocation_in_certificate,
         validate_no_forged_quorum,
@@ -4723,4 +4724,3 @@ try:
     ]
 except ImportError:
     pass
-

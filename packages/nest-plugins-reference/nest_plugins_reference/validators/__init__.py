@@ -28,12 +28,6 @@ from nest_plugins_reference.validators.bft_validators import (
     check_no_forged_quorum,
     check_no_stuck_view,
 )
-from nest_plugins_reference.validators.saurabhvmagdum_bft_quorum_validators import (
-    validate_no_conflicting_commits,
-    validate_no_equivocation_in_certificate,
-    validate_no_forged_quorum,
-    validate_no_stuck_view,
-)
 from nest_plugins_reference.validators.gossip_validators import (
     ConvergenceFailureError,
     PartitionLeakError,
@@ -47,6 +41,12 @@ from nest_plugins_reference.validators.privacy_validators import (
     check_replay_rejected,
     check_stale_revocation_blocked,
     corrupt_proof,
+)
+from nest_plugins_reference.validators.saurabhvmagdum_bft_quorum_validators import (
+    validate_no_conflicting_commits,
+    validate_no_equivocation_in_certificate,
+    validate_no_forged_quorum,
+    validate_no_stuck_view,
 )
 
 __all__ = [
